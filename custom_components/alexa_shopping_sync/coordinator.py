@@ -68,6 +68,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._event_unsub: CALLBACK_TYPE | None = None
         self._mutation_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._mutation_task: asyncio.Task[None] | None = None
+        self._sync_lock = asyncio.Lock()
         self._consecutive_errors = 0
         self._last_error: str = ""
         self._last_success: str = ""
@@ -244,10 +245,11 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
 
         try:
-            ha_items = await self._ha_bridge.async_get_items()
-            self._ha_item_count = len(ha_items)
-            result = await self._sync_engine.async_sync_ha_to_alexa(ha_items)
-            await self._sync_engine.async_save_state()
+            async with self._sync_lock:
+                ha_items = await self._ha_bridge.async_get_items()
+                self._ha_item_count = len(ha_items)
+                result = await self._sync_engine.async_sync_ha_to_alexa(ha_items)
+                await self._sync_engine.async_save_state()
 
             if result.errors:
                 _LOGGER.warning(
@@ -272,112 +274,109 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Poll Alexa and sync changes to HA.
 
         This is called by DataUpdateCoordinator on each poll interval.
+        The sync lock prevents concurrent execution with mutation queue
+        processing or full_resync, which could cause duplicate items.
         """
-        if not self._auth_manager or not self._amazon_client or not self._sync_engine:
-            raise UpdateFailed("Integration not fully initialized")
+        async with self._sync_lock:
+            if not self._auth_manager or not self._amazon_client or not self._sync_engine:
+                raise UpdateFailed("Integration not fully initialized")
 
-        if not self._auth_manager.authenticated:
-            self._connected = False
-            self._trigger_reauth()
-            raise UpdateFailed("Not authenticated - reauth required")
+            if not self._auth_manager.authenticated:
+                self._connected = False
+                self._trigger_reauth()
+                raise UpdateFailed("Not authenticated - reauth required")
 
-        try:
-            # Step 1: Get Alexa snapshot
-            alexa_items = await self._amazon_client.async_get_snapshot()
-            self._alexa_item_count = len(alexa_items)
+            try:
+                alexa_items = await self._amazon_client.async_get_snapshot()
+                self._alexa_item_count = len(alexa_items)
 
-            # Step 2: Sync Alexa -> HA
-            result = await self._sync_engine.async_sync_alexa_to_ha(alexa_items)
+                result = await self._sync_engine.async_sync_alexa_to_ha(alexa_items)
 
-            # Step 3: Update HA item count
-            if self._ha_bridge:
-                try:
-                    ha_items = await self._ha_bridge.async_get_items()
-                    self._ha_item_count = len(ha_items)
-                except Exception:
-                    pass
+                if self._ha_bridge:
+                    try:
+                        ha_items = await self._ha_bridge.async_get_items()
+                        self._ha_item_count = len(ha_items)
+                    except Exception:
+                        pass
 
-            # Step 4: Update state
-            self._sync_engine.state.last_alexa_snapshot_hash = (
-                self._amazon_client.compute_snapshot_hash(alexa_items)
-            )
-            if self._amazon_client.shopping_list_id:
-                self._sync_engine.state.shopping_list_id = (
-                    self._amazon_client.shopping_list_id
+                self._sync_engine.state.last_alexa_snapshot_hash = (
+                    self._amazon_client.compute_snapshot_hash(alexa_items)
+                )
+                if self._amazon_client.shopping_list_id:
+                    self._sync_engine.state.shopping_list_id = (
+                        self._amazon_client.shopping_list_id
+                    )
+
+                await self._sync_engine.async_save_state()
+
+                self._connected = True
+                self._consecutive_errors = 0
+                self._last_success = str(time.time())
+                self._last_error = ""
+
+                if result.errors:
+                    _LOGGER.warning(
+                        "Alexa->HA sync had %d errors: %s",
+                        len(result.errors),
+                        result.errors[:3],
+                    )
+                    self._last_error = "; ".join(result.errors[:3])
+
+                _LOGGER.debug(
+                    "Poll complete: Alexa->HA +%d ~%d -%d (echo=%d, items=%d)",
+                    result.alexa_to_ha_adds,
+                    result.alexa_to_ha_updates,
+                    result.alexa_to_ha_deletes,
+                    result.skipped_echo,
+                    self._alexa_item_count,
                 )
 
-            # Step 5: Save state
-            await self._sync_engine.async_save_state()
+                return {
+                    "alexa_items": self._alexa_item_count,
+                    "ha_items": self._ha_item_count,
+                    "last_sync": self._last_success,
+                    "connected": True,
+                }
 
-            # Success
-            self._connected = True
-            self._consecutive_errors = 0
-            self._last_success = str(time.time())
-            self._last_error = ""
+            except SessionExpiredError:
+                self._connected = False
+                self._trigger_reauth()
+                raise UpdateFailed("Session expired - reauth required")
 
-            if result.errors:
-                _LOGGER.warning(
-                    "Alexa->HA sync had %d errors: %s",
-                    len(result.errors),
-                    result.errors[:3],
-                )
-                self._last_error = "; ".join(result.errors[:3])
+            except ThrottledError as err:
+                self._consecutive_errors += 1
+                self._last_error = str(err)
+                if self._consecutive_errors >= 3:
+                    ir.async_create_issue(
+                        self.hass,
+                        DOMAIN,
+                        "rate_limited",
+                        is_fixable=False,
+                        severity=ir.IssueSeverity.WARNING,
+                        translation_key="rate_limited",
+                    )
+                raise UpdateFailed(f"Rate limited: {err}")
 
-            _LOGGER.debug(
-                "Poll complete: Alexa->HA +%d ~%d -%d (echo=%d, items=%d)",
-                result.alexa_to_ha_adds,
-                result.alexa_to_ha_updates,
-                result.alexa_to_ha_deletes,
-                result.skipped_echo,
-                self._alexa_item_count,
-            )
+            except Exception as err:
+                self._connected = False
+                self._consecutive_errors += 1
+                self._last_error = str(err)
 
-            return {
-                "alexa_items": self._alexa_item_count,
-                "ha_items": self._ha_item_count,
-                "last_sync": self._last_success,
-                "connected": True,
-            }
+                if self._consecutive_errors >= 5:
+                    _LOGGER.error(
+                        "Too many consecutive errors (%d), may need reauth",
+                        self._consecutive_errors,
+                    )
+                    ir.async_create_issue(
+                        self.hass,
+                        DOMAIN,
+                        "repeated_auth_failure",
+                        is_fixable=False,
+                        severity=ir.IssueSeverity.ERROR,
+                        translation_key="repeated_auth_failure",
+                    )
 
-        except SessionExpiredError:
-            self._connected = False
-            self._trigger_reauth()
-            raise UpdateFailed("Session expired - reauth required")
-
-        except ThrottledError as err:
-            self._consecutive_errors += 1
-            self._last_error = str(err)
-            if self._consecutive_errors >= 3:
-                ir.async_create_issue(
-                    self.hass,
-                    DOMAIN,
-                    "rate_limited",
-                    is_fixable=False,
-                    severity=ir.IssueSeverity.WARNING,
-                    translation_key="rate_limited",
-                )
-            raise UpdateFailed(f"Rate limited: {err}")
-
-        except Exception as err:
-            self._connected = False
-            self._consecutive_errors += 1
-            self._last_error = str(err)
-
-            if self._consecutive_errors >= 5:
-                _LOGGER.error(
-                    "Too many consecutive errors (%d), may need reauth",
-                    self._consecutive_errors,
-                )
-                ir.async_create_issue(
-                    self.hass,
-                    DOMAIN,
-                    "repeated_auth_failure",
-                    is_fixable=False,
-                    severity=ir.IssueSeverity.ERROR,
-                    translation_key="repeated_auth_failure",
-                )
-
-            raise UpdateFailed(f"Update failed: {err}")
+                raise UpdateFailed(f"Update failed: {err}")
 
     def _trigger_reauth(self) -> None:
         """Trigger reauth flow."""
@@ -405,7 +404,8 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def async_full_resync(self) -> SyncResult | None:
         """Perform a full resync."""
         if self._sync_engine:
-            result = await self._sync_engine.async_full_resync()
+            async with self._sync_lock:
+                result = await self._sync_engine.async_full_resync()
             await self.async_request_refresh()
             return result
         return None
