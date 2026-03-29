@@ -292,21 +292,6 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         resp_url = URL(str(resp.url))
         resp_path = resp_url.path
 
-        # Check for passkey indicators — only on Amazon auth pages (/ap/),
-        # not on post-login pages which may contain passkey upsell banners.
-        if "/ap/" in resp_path:
-            try:
-                text = resp.text
-                check_page_for_unsupported_flow(text)
-            except PasskeyDetectedError:
-                self._login_error = "passkey_not_supported"
-                _LOGGER.error("Passkey flow detected - not supported")
-            except UnsupportedLoginFlowError:
-                self._login_error = "unsupported_login_flow"
-                _LOGGER.error("Unsupported Amazon login flow detected")
-            except Exception:
-                pass
-
         # Successful login lands on /ap/maplanding or /spa/index.html
         # or the main amazon page after successful auth
         if resp_path in ["/ap/maplanding", "/spa/index.html"]:
@@ -339,6 +324,20 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             if callback_url:
                 return URL(callback_url)
             return "Login successful. Please close this window."
+
+        # Check for passkey/unsupported flows only on non-success auth pages.
+        # Must come AFTER success checks so /ap/maplanding is never scanned.
+        if "/ap/" in resp_path:
+            try:
+                check_page_for_unsupported_flow(resp.text)
+            except PasskeyDetectedError:
+                self._login_error = "passkey_not_supported"
+                _LOGGER.error("Passkey flow detected - not supported")
+            except UnsupportedLoginFlowError:
+                self._login_error = "unsupported_login_flow"
+                _LOGGER.error("Unsupported Amazon login flow detected")
+            except Exception:
+                pass
 
         return None
 
