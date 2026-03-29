@@ -42,6 +42,11 @@ async def async_setup_entry(
     coordinator = AlexaShoppingCoordinator(hass, entry)
     await coordinator.async_initialize()
 
+    # Fetch data before setting up platforms so that a failed first refresh
+    # (ConfigEntryNotReady) leaves no platform entities behind, avoiding the
+    # "already been setup" error on the subsequent retry.
+    await coordinator.async_config_entry_first_refresh()
+
     entry.runtime_data = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -51,9 +56,6 @@ async def async_setup_entry(
 
     # Start listening for HA shopping list events
     coordinator.async_start_event_listener()
-
-    # Initial data fetch
-    await coordinator.async_config_entry_first_refresh()
 
     return True
 

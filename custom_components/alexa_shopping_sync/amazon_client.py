@@ -29,7 +29,7 @@ import json
 import logging
 from typing import Any
 
-from aiohttp import ClientResponseError, ClientSession
+import httpx
 
 from .auth import AuthManager
 from .const import (
@@ -103,73 +103,66 @@ class AmazonShoppingClient:
 
         for attempt in range(retry_count + 1):
             try:
-                kwargs: dict[str, Any] = {
-                    "timeout": HTTP_TIMEOUT,
-                    "headers": {
-                        "User-Agent": AMAZON_USER_AGENT,
-                        "Accept": "*/*",
-                        "Accept-Language": "*",
-                        "DNT": "1",
-                        "Upgrade-Insecure-Requests": "1",
-                    },
+                headers: dict[str, str] = {
+                    "Accept": "*/*",
+                    "Accept-Language": "*",
+                    "DNT": "1",
                 }
+                kwargs: dict[str, Any] = {"headers": headers}
                 if json_data is not None:
                     kwargs["json"] = json_data
-                    kwargs["headers"]["Content-Type"] = "application/json"
 
-                async with session.request(method, url, **kwargs) as resp:
-                    if resp.status == 200:
-                        self._consecutive_auth_failures = 0
-                        return await resp.json()
+                resp = await session.request(method, url, **kwargs)
+                status = resp.status_code
 
-                    if resp.status == 204:
-                        self._consecutive_auth_failures = 0
-                        return {}
+                if status == 200:
+                    self._consecutive_auth_failures = 0
+                    return resp.json()
 
-                    if resp.status in (401, 403):
-                        self._consecutive_auth_failures += 1
-                        self._auth.mark_session_expired()
-                        raise SessionExpiredError(
-                            f"Amazon returned {resp.status} - session expired"
-                        )
+                if status == 204:
+                    self._consecutive_auth_failures = 0
+                    return {}
 
-                    if resp.status == 429:
-                        if attempt < retry_count:
-                            wait = HTTP_BACKOFF_FACTOR * (2**attempt)
-                            _LOGGER.warning(
-                                "Amazon rate limit (429), backing off %.1fs", wait
-                            )
-                            await asyncio.sleep(wait)
-                            continue
-                        raise ThrottledError("Amazon rate limit exceeded (429)")
+                if status in (401, 403):
+                    self._consecutive_auth_failures += 1
+                    self._auth.mark_session_expired()
+                    raise SessionExpiredError(
+                        f"Amazon returned {status} - session expired"
+                    )
 
-                    if resp.status >= 500 and attempt < retry_count:
+                if status == 429:
+                    if attempt < retry_count:
                         wait = HTTP_BACKOFF_FACTOR * (2**attempt)
                         _LOGGER.warning(
-                            "Amazon server error %d, retrying in %.1fs",
-                            resp.status,
-                            wait,
+                            "Amazon rate limit (429), backing off %.1fs", wait
                         )
                         await asyncio.sleep(wait)
                         continue
+                    raise ThrottledError("Amazon rate limit exceeded (429)")
 
-                    body = await resp.text()
-                    _LOGGER.error(
-                        "Amazon API error %d for %s: %s",
-                        resp.status,
-                        path,
-                        body[:200],
+                if status >= 500 and attempt < retry_count:
+                    wait = HTTP_BACKOFF_FACTOR * (2**attempt)
+                    _LOGGER.warning(
+                        "Amazon server error %d, retrying in %.1fs", status, wait
                     )
-                    raise ClientResponseError(
-                        request_info=resp.request_info,
-                        history=resp.history,
-                        status=resp.status,
-                        message=f"API error: {resp.status}",
-                    )
+                    await asyncio.sleep(wait)
+                    continue
+
+                _LOGGER.error(
+                    "Amazon API error %d for %s: %s",
+                    status,
+                    path,
+                    resp.text[:200],
+                )
+                raise httpx.HTTPStatusError(
+                    message=f"API error: {status}",
+                    request=resp.request,
+                    response=resp,
+                )
 
             except (SessionExpiredError, ThrottledError):
                 raise
-            except ClientResponseError:
+            except httpx.HTTPStatusError:
                 raise
             except asyncio.CancelledError:
                 raise

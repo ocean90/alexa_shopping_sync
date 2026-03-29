@@ -5,14 +5,12 @@ from __future__ import annotations
 import base64
 import logging
 import re
-from http.cookies import SimpleCookie
 from typing import Any
 from urllib.parse import urlparse
 
+import httpx
 import pyotp
-from aiohttp import ClientSession, CookieJar
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
 from .const import (
     AMAZON_BASE_URL_TEMPLATE,
@@ -129,9 +127,8 @@ class AuthManager:
         self._email = email
         self._password = password
         self._otp_secret = normalize_otp_secret(otp_secret)
-        self._session: ClientSession | None = None
+        self._session: httpx.AsyncClient | None = None
         self._cookies: dict[str, str] = {}
-        self._csrf_token: str | None = None
         self._authenticated = False
         self._base_url = AMAZON_BASE_URL_TEMPLATE.format(domain=amazon_domain)
         self._login_attempt_count = 0
@@ -143,8 +140,8 @@ class AuthManager:
         return self._authenticated
 
     @property
-    def session(self) -> ClientSession | None:
-        """Return the active aiohttp session."""
+    def session(self) -> httpx.AsyncClient | None:
+        """Return the active httpx session."""
         return self._session
 
     @property
@@ -161,22 +158,22 @@ class AuthManager:
         """Generate current TOTP code."""
         return generate_otp(self._otp_secret)
 
-    async def async_create_session(self) -> ClientSession:
-        """Create a new aiohttp session with cookie jar."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+    async def async_create_session(self) -> httpx.AsyncClient:
+        """Create a new httpx session."""
+        if self._session and not self._session.is_closed:
+            await self._session.aclose()
 
-        jar = CookieJar(unsafe=True)
-        self._session = async_create_clientsession(
-            self._hass,
-            cookie_jar=jar,
+        self._session = httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
+            follow_redirects=True,
+            headers={"User-Agent": AMAZON_USER_AGENT},
         )
         return self._session
 
     async def async_close(self) -> None:
         """Close the session."""
-        if self._session and not self._session.closed:
-            await self._session.close()
+        if self._session and not self._session.is_closed:
+            await self._session.aclose()
         self._session = None
         self._authenticated = False
 
@@ -185,13 +182,8 @@ class AuthManager:
         self._authenticated = True
         if cookies:
             self._cookies.update(cookies)
-            # Inject cookies into the aiohttp session cookie jar
             if self._session is not None:
-                from yarl import URL
-
-                self._session.cookie_jar.update_cookies(
-                    cookies, URL(self._base_url)
-                )
+                self._session.cookies.update(cookies)
         _LOGGER.debug(
             "Session marked as authenticated (cookies=%d)", len(cookies or {})
         )
@@ -202,32 +194,23 @@ class AuthManager:
         _LOGGER.warning("Amazon session marked as expired")
 
     async def async_validate_session(self) -> bool:
-        """Check if the current session is still valid.
-
-        Makes a lightweight request to Amazon to verify cookies are still accepted.
-        Uses the shopping list API (alexa.amazon.de is retired).
-        """
+        """Check if the current session is still valid."""
         if not self._session or not self._authenticated:
             return False
 
         try:
             url = f"https://www.{self._amazon_domain}/alexashoppinglists/api/getlistitems"
-            async with self._session.get(
-                url,
-                timeout=HTTP_TIMEOUT,
-                allow_redirects=False,
-                headers={"User-Agent": AMAZON_USER_AGENT},
-            ) as resp:
-                if resp.status == 200:
-                    return True
-                if resp.status in (301, 302):
-                    location = resp.headers.get("Location", "")
-                    if "signin" in location.lower() or "ap/signin" in location.lower():
-                        self.mark_session_expired()
-                        return False
-                if resp.status in (401, 403):
+            resp = await self._session.get(url, follow_redirects=False)
+            if resp.status_code == 200:
+                return True
+            if resp.status_code in (301, 302):
+                location = resp.headers.get("location", "")
+                if "signin" in location.lower() or "ap/signin" in location.lower():
                     self.mark_session_expired()
                     return False
+            if resp.status_code in (401, 403):
+                self.mark_session_expired()
+                return False
         except Exception:
             _LOGGER.debug("Session validation failed", exc_info=True)
             return False
@@ -238,13 +221,10 @@ class AuthManager:
         """Extract cookies from session as dict (no secrets logged)."""
         if not self._session:
             return {}
-        cookies = {}
-        for cookie in self._session.cookie_jar:
-            cookies[cookie.key] = cookie.value
-        return cookies
+        return dict(self._session.cookies)
 
-    async def async_get_authenticated_session(self) -> ClientSession:
-        """Return the authenticated session or raise."""
+    async def async_get_authenticated_session(self) -> httpx.AsyncClient:
+        """Return the authenticated httpx session or raise."""
         if not self._session or not self._authenticated:
             raise SessionExpiredError("No authenticated session available")
         return self._session
