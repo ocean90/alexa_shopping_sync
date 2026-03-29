@@ -58,9 +58,10 @@ def normalize_otp_secret(secret: str) -> str:
     """
     cleaned = re.sub(r"[\s\-]", "", secret.strip().upper())
 
-    # Validate base32
+    # Validate base32 — authenticator app secrets are unpadded, so add padding
     try:
-        base64.b32decode(cleaned)
+        padding = (8 - len(cleaned) % 8) % 8
+        base64.b32decode(cleaned + "=" * padding)
     except Exception as err:
         raise OTPSecretInvalidError(
             f"Invalid OTP secret: not valid base32 encoding"
