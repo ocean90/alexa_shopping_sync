@@ -570,6 +570,17 @@ class SyncEngine:
             self._previous_alexa_items = alexa_items
             return result
 
+        # Warm start: after HA restart _previous_alexa_items is empty but
+        # initial sync already ran (state loaded from storage). Treat current
+        # snapshot as baseline so we don't mistakenly add all items again.
+        if not self._previous_alexa_items:
+            _LOGGER.debug(
+                "Warm start: setting %d Alexa items as baseline (no diff)",
+                len(alexa_items),
+            )
+            self._previous_alexa_items = alexa_items
+            return result
+
         diff = self._diff_alexa_snapshots(self._previous_alexa_items, alexa_items)
         self._cleanup_expired_pending_ops()
 
@@ -706,6 +717,15 @@ class SyncEngine:
             return result
 
         if self._sync_mode == SyncMode.ALEXA_TO_HA:
+            self._previous_ha_items = ha_items
+            return result
+
+        # Warm start: same as Alexa side — avoid treating all items as new.
+        if not self._previous_ha_items:
+            _LOGGER.debug(
+                "Warm start: setting %d HA items as baseline (no diff)",
+                len(ha_items),
+            )
             self._previous_ha_items = ha_items
             return result
 
