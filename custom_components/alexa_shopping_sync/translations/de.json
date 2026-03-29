@@ -1,0 +1,151 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Amazon-Konto",
+        "description": "Konfiguriere dein Amazon-Konto für die Alexa-Einkaufslisten-Synchronisation.\n\n**Wichtig:** Nur Konten mit 2-Schritt-Verifizierung über eine Authenticator-App werden unterstützt. Keine Passkeys, kein SMS-OTP.",
+        "data": {
+          "amazon_domain": "Amazon-Domain",
+          "email": "E-Mail-Adresse",
+          "password": "Passwort",
+          "otp_secret": "Authenticator-App-Geheimschlüssel (52 Zeichen)",
+          "ha_url": "Home Assistant URL",
+          "public_url": "Öffentliche URL (optional)"
+        },
+        "data_description": {
+          "amazon_domain": "z.B. amazon.de",
+          "otp_secret": "Der 52-stellige Geheimschlüssel aus der Authenticator-App-Einrichtung. NICHT der 6-stellige Code.",
+          "ha_url": "Interne URL deiner Home Assistant Instanz",
+          "public_url": "Nur nötig, wenn HA nicht direkt erreichbar ist"
+        }
+      },
+      "proxy_login": {
+        "title": "Amazon-Anmeldung",
+        "description": "Bitte schließe die Anmeldung im geöffneten Browserfenster ab. Der OTP-Code wird automatisch ausgefüllt.\n\n[Anmeldeseite öffnen]({proxy_url})"
+      },
+      "sync_options": {
+        "title": "Sync-Optionen",
+        "data": {
+          "sync_mode": "Sync-Modus",
+          "initial_sync_mode": "Initialer Sync-Modus",
+          "poll_interval": "Abfrage-Intervall (Sekunden)",
+          "preserve_duplicates": "Duplikate beibehalten",
+          "mirror_completed": "Erledigte Einträge synchronisieren",
+          "debug_mode": "Debug-Logging aktivieren"
+        },
+        "data_description": {
+          "sync_mode": "Richtung der Synchronisation",
+          "initial_sync_mode": "Wie bestehende Einträge beim ersten Sync behandelt werden",
+          "poll_interval": "Wie oft auf Änderungen geprüft wird (30-600 Sekunden)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Erneute Authentifizierung",
+        "description": "Deine Amazon-Sitzung ist abgelaufen. Bitte authentifiziere dich erneut."
+      }
+    },
+    "error": {
+      "invalid_url": "Ungültiges URL-Format",
+      "connection_error": "Verbindung zu Amazon fehlgeschlagen",
+      "login_failed": "Anmeldung fehlgeschlagen - E-Mail und Passwort prüfen",
+      "2fa_key_invalid": "Ungültiger Authenticator-App-Geheimschlüssel",
+      "passkey_not_supported": "Passkey-Anmeldung erkannt - nur Authenticator-App-2SV wird unterstützt",
+      "unsupported_login_flow": "Amazon hat einen nicht unterstützten Anmeldevorgang gestartet",
+      "captcha_not_completed": "CAPTCHA konnte nicht abgeschlossen werden",
+      "shopping_list_missing": "Home Assistant Einkaufsliste nicht gefunden. Bitte zuerst aktivieren.",
+      "amazon_list_id_not_found": "Alexa-Einkaufsliste konnte nicht gefunden werden",
+      "throttled": "Amazon-Ratenlimit erreicht - bitte warten und erneut versuchen",
+      "unknown_error": "Ein unerwarteter Fehler ist aufgetreten: {error}"
+    },
+    "abort": {
+      "already_configured": "Dieses Amazon-Konto ist bereits konfiguriert",
+      "reauth_successful": "Erneute Authentifizierung erfolgreich"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Alexa-Einkaufslisten-Sync Optionen",
+        "data": {
+          "sync_mode": "Sync-Modus",
+          "poll_interval": "Abfrage-Intervall (Sekunden)",
+          "preserve_duplicates": "Duplikate beibehalten",
+          "mirror_completed": "Erledigte Einträge synchronisieren",
+          "debug_mode": "Debug-Logging aktivieren"
+        }
+      }
+    }
+  },
+  "issues": {
+    "reauth_needed": {
+      "title": "Alexa Shopping Sync: Erneute Authentifizierung erforderlich",
+      "description": "Deine Amazon-Sitzung ist abgelaufen. Bitte authentifiziere dich über die Integrationseinstellungen erneut."
+    },
+    "shopping_list_missing": {
+      "title": "Alexa Shopping Sync: Einkaufsliste nicht gefunden",
+      "description": "Die Home Assistant Einkaufslisten-Integration ist nicht konfiguriert. Bitte füge sie hinzu, damit die Synchronisation funktioniert."
+    },
+    "passkey_detected": {
+      "title": "Alexa Shopping Sync: Passkey-Anmeldung nicht unterstützt",
+      "description": "Amazon erfordert einen Passkey zur Anmeldung. Diese Integration unterstützt nur Authenticator-App-2SV. Bitte deaktiviere Passkeys in deinen Amazon-Kontoeinstellungen."
+    },
+    "unsupported_login_flow": {
+      "title": "Alexa Shopping Sync: Nicht unterstützter Anmeldevorgang",
+      "description": "Amazon hat einen nicht unterstützten Anmeldevorgang gestartet. Bitte überprüfe deine Kontoeinstellungen und versuche es erneut."
+    },
+    "repeated_auth_failure": {
+      "title": "Alexa Shopping Sync: Wiederholte Authentifizierungsfehler",
+      "description": "Mehrere Authentifizierungsfehler erkannt (HTTP 401/403). Bitte authentifiziere dich erneut."
+    },
+    "rate_limited": {
+      "title": "Alexa Shopping Sync: Von Amazon gedrosselt",
+      "description": "Amazon drosselt Anfragen (HTTP 429). Die Integration versucht es automatisch mit Verzögerung erneut."
+    }
+  },
+  "services": {
+    "force_refresh": {
+      "name": "Sofort aktualisieren",
+      "description": "Sofortigen Sync-Zyklus erzwingen"
+    },
+    "full_resync": {
+      "name": "Vollständiger Resync",
+      "description": "Zuordnungen löschen und vollständigen Resync durchführen"
+    },
+    "clear_local_mapping": {
+      "name": "Lokale Zuordnungen löschen",
+      "description": "Den lokalen Zuordnungsspeicher leeren"
+    },
+    "mark_reauth_needed": {
+      "name": "Erneute Authentifizierung anfordern",
+      "description": "Manuell den Reauth-Flow auslösen"
+    },
+    "export_sanitized_diagnostics": {
+      "name": "Bereinigte Diagnose exportieren",
+      "description": "Diagnosedaten ohne Geheimnisse exportieren"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Verbunden"
+      }
+    },
+    "sensor": {
+      "last_success": {
+        "name": "Letzter erfolgreicher Sync"
+      },
+      "last_error": {
+        "name": "Letzter Fehler"
+      },
+      "pending_operations": {
+        "name": "Ausstehende Operationen"
+      },
+      "alexa_items": {
+        "name": "Alexa-Einträge"
+      },
+      "ha_items": {
+        "name": "HA-Einträge"
+      }
+    }
+  }
+}

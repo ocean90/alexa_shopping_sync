@@ -1,0 +1,19 @@
+force_refresh:
+  name: Force Refresh
+  description: Force an immediate sync cycle
+
+full_resync:
+  name: Full Resync
+  description: Clear all mappings and perform a full resync from scratch
+
+clear_local_mapping:
+  name: Clear Local Mapping
+  description: Clear the local item mapping store without triggering a resync
+
+mark_reauth_needed:
+  name: Mark Re-auth Needed
+  description: Manually mark the session as expired and trigger re-authentication
+
+export_sanitized_diagnostics:
+  name: Export Sanitized Diagnostics
+  description: Export diagnostics data with all secrets removed

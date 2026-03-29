@@ -1,0 +1,151 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Amazon Account",
+        "description": "Configure your Amazon account for Alexa Shopping List sync.\n\n**Important:** Only accounts with 2-Step Verification via Authenticator App are supported. No Passkeys, no SMS OTP.",
+        "data": {
+          "amazon_domain": "Amazon Domain",
+          "email": "Email Address",
+          "password": "Password",
+          "otp_secret": "Authenticator App Secret (52-character key)",
+          "ha_url": "Home Assistant URL",
+          "public_url": "Public URL (optional)"
+        },
+        "data_description": {
+          "amazon_domain": "e.g. amazon.de",
+          "otp_secret": "The 52-character secret key from your authenticator app setup. NOT the 6-digit code.",
+          "ha_url": "Internal URL of your Home Assistant instance",
+          "public_url": "Only needed if HA is not directly accessible"
+        }
+      },
+      "proxy_login": {
+        "title": "Amazon Login",
+        "description": "Please complete the login in the browser window that opened. The OTP code will be filled automatically.\n\n[Open Login Page]({proxy_url})"
+      },
+      "sync_options": {
+        "title": "Sync Options",
+        "data": {
+          "sync_mode": "Sync Mode",
+          "initial_sync_mode": "Initial Sync Mode",
+          "poll_interval": "Poll Interval (seconds)",
+          "preserve_duplicates": "Preserve duplicate items",
+          "mirror_completed": "Sync completed items",
+          "debug_mode": "Enable debug logging"
+        },
+        "data_description": {
+          "sync_mode": "Direction of synchronization",
+          "initial_sync_mode": "How to handle existing items on first sync",
+          "poll_interval": "How often to check for changes (30-600 seconds)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate",
+        "description": "Your Amazon session has expired. Please re-authenticate."
+      }
+    },
+    "error": {
+      "invalid_url": "Invalid URL format",
+      "connection_error": "Could not connect to Amazon",
+      "login_failed": "Login failed - check email and password",
+      "2fa_key_invalid": "Invalid Authenticator App secret key",
+      "passkey_not_supported": "Passkey login detected - only Authenticator App 2SV is supported",
+      "unsupported_login_flow": "Amazon entered an unsupported login flow",
+      "captcha_not_completed": "CAPTCHA could not be completed",
+      "shopping_list_missing": "Home Assistant Shopping List integration not found. Please enable it first.",
+      "amazon_list_id_not_found": "Could not find Alexa shopping list",
+      "throttled": "Amazon rate limit hit - please wait and try again",
+      "unknown_error": "An unexpected error occurred: {error}"
+    },
+    "abort": {
+      "already_configured": "This Amazon account is already configured",
+      "reauth_successful": "Re-authentication successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Alexa Shopping List Sync Options",
+        "data": {
+          "sync_mode": "Sync Mode",
+          "poll_interval": "Poll Interval (seconds)",
+          "preserve_duplicates": "Preserve duplicate items",
+          "mirror_completed": "Sync completed items",
+          "debug_mode": "Enable debug logging"
+        }
+      }
+    }
+  },
+  "issues": {
+    "reauth_needed": {
+      "title": "Alexa Shopping Sync: Re-authentication required",
+      "description": "Your Amazon session has expired. Please re-authenticate via the integration settings."
+    },
+    "shopping_list_missing": {
+      "title": "Alexa Shopping Sync: Shopping List not found",
+      "description": "The Home Assistant Shopping List integration is not configured. Please add it for sync to work."
+    },
+    "passkey_detected": {
+      "title": "Alexa Shopping Sync: Passkey login not supported",
+      "description": "Amazon is requiring a Passkey for login. This integration only supports Authenticator App 2SV. Please disable Passkeys in your Amazon account settings."
+    },
+    "unsupported_login_flow": {
+      "title": "Alexa Shopping Sync: Unsupported login flow",
+      "description": "Amazon entered an unsupported login flow. Please check your account settings and try again."
+    },
+    "repeated_auth_failure": {
+      "title": "Alexa Shopping Sync: Repeated authentication failures",
+      "description": "Multiple authentication failures detected (HTTP 401/403). Please re-authenticate."
+    },
+    "rate_limited": {
+      "title": "Alexa Shopping Sync: Rate limited by Amazon",
+      "description": "Amazon is rate-limiting requests (HTTP 429). The integration will automatically retry with backoff."
+    }
+  },
+  "services": {
+    "force_refresh": {
+      "name": "Force Refresh",
+      "description": "Force an immediate sync cycle"
+    },
+    "full_resync": {
+      "name": "Full Resync",
+      "description": "Clear mappings and perform a full resync"
+    },
+    "clear_local_mapping": {
+      "name": "Clear Local Mapping",
+      "description": "Clear the local item mapping store"
+    },
+    "mark_reauth_needed": {
+      "name": "Mark Re-auth Needed",
+      "description": "Manually trigger re-authentication flow"
+    },
+    "export_sanitized_diagnostics": {
+      "name": "Export Sanitized Diagnostics",
+      "description": "Export diagnostics data with all secrets removed"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connected": {
+        "name": "Connected"
+      }
+    },
+    "sensor": {
+      "last_success": {
+        "name": "Last Successful Sync"
+      },
+      "last_error": {
+        "name": "Last Error"
+      },
+      "pending_operations": {
+        "name": "Pending Operations"
+      },
+      "alexa_items": {
+        "name": "Alexa Items"
+      },
+      "ha_items": {
+        "name": "HA Items"
+      }
+    }
+  }
+}
