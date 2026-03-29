@@ -12,6 +12,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -403,6 +404,11 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_full_resync(self) -> SyncResult | None:
         """Perform a full resync."""
+        if not self._auth_manager or not self._auth_manager.authenticated:
+            raise ServiceValidationError(
+                "Not authenticated with Amazon. Please complete re-authentication first.",
+                translation_domain=DOMAIN,
+            )
         if self._sync_engine:
             async with self._sync_lock:
                 result = await self._sync_engine.async_full_resync()
