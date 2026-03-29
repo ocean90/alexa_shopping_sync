@@ -110,6 +110,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         self._proxy_view: AlexaShoppingProxyView | None = None
         self._user_input: dict[str, Any] = {}
         self._login_error: str | None = None
+        self._captured_cookies: dict[str, str] = {}
 
     @staticmethod
     @callback
@@ -313,6 +314,9 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             config_flow_id = self._proxy.init_query.get("config_flow_id")
             callback_url = self._proxy.init_query.get("callback_url")
 
+            # Capture cookies before reset_data() clears the session
+            self._captured_cookies = self._extract_proxy_cookies(resp)
+
             await self._proxy.reset_data()
 
             if callback_url:
@@ -330,12 +334,38 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         ):
             _LOGGER.info("Amazon login successful (main page)")
             callback_url = self._proxy.init_query.get("callback_url")
+            self._captured_cookies = self._extract_proxy_cookies(resp)
             await self._proxy.reset_data()
             if callback_url:
                 return URL(callback_url)
             return "Login successful. Please close this window."
 
         return None
+
+    def _extract_proxy_cookies(self, last_resp: httpx.Response) -> dict[str, str]:
+        """Extract cookies from the proxy httpx session.
+
+        Tries the session cookie jar first (all accumulated cookies),
+        falls back to the last response's cookies.
+        """
+        cookies: dict[str, str] = {}
+        # Try to get accumulated cookies from the httpx client session
+        try:
+            session = self._proxy.session  # type: ignore[union-attr]
+            if session is not None:
+                cookies = {k: v for k, v in session.cookies.items()}
+        except Exception:
+            pass
+
+        # Merge/override with cookies from the last response
+        try:
+            for k, v in last_resp.cookies.items():
+                cookies[k] = v
+        except Exception:
+            pass
+
+        _LOGGER.debug("Captured %d cookies from proxy session", len(cookies))
+        return cookies
 
     async def async_step_check_proxy(
         self, user_input: dict[str, Any] | None = None
@@ -359,15 +389,18 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Finish proxy login and extract session cookies."""
-        if self._proxy and self._proxy.session:
-            # Extract cookies from the httpx session
-            cookies = dict(self._proxy.session.cookies)
-            if cookies:
-                _LOGGER.debug(
-                    "Captured %d session cookies from proxy", len(cookies)
-                )
-                self._user_input["_cookies"] = cookies
-                return await self.async_step_sync_options()
+        cookies = self._captured_cookies
+        if not cookies:
+            # Last-chance fallback: try reading from proxy session directly
+            try:
+                if self._proxy and self._proxy.session:
+                    cookies = {k: v for k, v in self._proxy.session.cookies.items()}
+            except Exception:
+                pass
+
+        if cookies:
+            self._user_input["_cookies"] = cookies
+            return await self.async_step_sync_options()
 
         _LOGGER.error("No session cookies captured after proxy login")
         return self.async_abort(reason="login_failed")
