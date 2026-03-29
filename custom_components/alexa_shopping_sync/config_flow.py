@@ -21,6 +21,7 @@ from authcaptureproxy import AuthCaptureProxy
 from bs4 import BeautifulSoup
 from homeassistant.components.http.view import HomeAssistantView
 from homeassistant.config_entries import (
+    SOURCE_REAUTH,
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
@@ -397,12 +398,29 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             except Exception:
                 pass
 
-        if cookies:
-            self._user_input["_cookies"] = cookies
-            return await self.async_step_sync_options()
+        if not cookies:
+            _LOGGER.error("No session cookies captured after proxy login")
+            return self.async_abort(reason="login_failed")
 
-        _LOGGER.error("No session cookies captured after proxy login")
-        return self.async_abort(reason="login_failed")
+        self._user_input["_cookies"] = cookies
+
+        # Reauth: update existing entry instead of creating a new one
+        if self.source == SOURCE_REAUTH:
+            reauth_entry = self._get_reauth_entry()
+            return self.async_update_reload_and_abort(
+                reauth_entry,
+                data_updates={
+                    CONF_PASSWORD: self._user_input.get(
+                        CONF_PASSWORD, reauth_entry.data[CONF_PASSWORD]
+                    ),
+                    CONF_OTP_SECRET: self._user_input.get(
+                        CONF_OTP_SECRET, reauth_entry.data[CONF_OTP_SECRET]
+                    ),
+                    "_cookies": cookies,
+                },
+            )
+
+        return await self.async_step_sync_options()
 
     async def async_step_sync_options(
         self, user_input: dict[str, Any] | None = None
