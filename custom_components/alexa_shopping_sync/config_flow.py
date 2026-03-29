@@ -1,13 +1,25 @@
-"""Config flow for Alexa Shopping List Sync."""
+"""Config flow for Alexa Shopping List Sync.
+
+Login flow based on authcaptureproxy (same approach as alexa_media_player).
+Uses HA's external step mechanism: user is redirected to the proxy URL,
+completes Amazon login there, proxy detects success and calls back to HA.
+"""
 
 from __future__ import annotations
 
-import asyncio
+import datetime
 import logging
-from typing import Any
+from functools import partial
+from typing import Any, Optional, Union
 from urllib.parse import urlparse
 
+import httpx
 import voluptuous as vol
+from aiohttp import web, web_response
+from aiohttp.web_exceptions import HTTPBadRequest
+from authcaptureproxy import AuthCaptureProxy
+from bs4 import BeautifulSoup
+from homeassistant.components.http.view import HomeAssistantView
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -15,12 +27,14 @@ from homeassistant.config_entries import (
     OptionsFlow,
 )
 from homeassistant.core import callback
-from homeassistant.helpers import issue_registry as ir
+from homeassistant.data_entry_flow import UnknownFlow
+from homeassistant.exceptions import Unauthorized
+from yarl import URL
 
 from .auth import (
-    AuthManager,
     check_page_for_captcha,
     check_page_for_unsupported_flow,
+    generate_otp,
     normalize_otp_secret,
 )
 from .const import (
@@ -44,11 +58,11 @@ from .const import (
     DOMAIN,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
+    PASSKEY_INDICATORS,
     InitialSyncMode,
     SyncMode,
 )
 from .exceptions import (
-    CaptchaNotCompletedError,
     OTPSecretInvalidError,
     PasskeyDetectedError,
     UnsupportedLoginFlowError,
@@ -56,8 +70,10 @@ from .exceptions import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Max time to wait for proxy login to complete
-PROXY_LOGIN_TIMEOUT = 300  # 5 minutes
+AUTH_PROXY_PATH = f"/auth/proxy/{DOMAIN}"
+AUTH_PROXY_NAME = f"auth:proxy:{DOMAIN}"
+AUTH_CALLBACK_PATH = f"/auth/callback/{DOMAIN}"
+AUTH_CALLBACK_NAME = f"auth:callback:{DOMAIN}"
 
 
 def _validate_url(url: str) -> bool:
@@ -69,6 +85,20 @@ def _validate_url(url: str) -> bool:
         return False
 
 
+def _autofill(items: dict[str, str], html: str) -> str:
+    """Autofill input tags in HTML forms.
+
+    Fills email, password, and OTP code into Amazon login forms.
+    Based on alexapy's autofill approach.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    for item, value in items.items():
+        for html_tag in soup.find_all(attrs={"name": item}):
+            if not html_tag.get("value"):
+                html_tag["value"] = value
+    return str(soup)
+
+
 class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Alexa Shopping List Sync."""
 
@@ -76,11 +106,10 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize."""
-        self._auth_manager: AuthManager | None = None
-        self._proxy_url: str | None = None
-        self._login_complete: asyncio.Event = asyncio.Event()
-        self._login_error: str | None = None
+        self._proxy: AuthCaptureProxy | None = None
+        self._proxy_view: AlexaShoppingProxyView | None = None
         self._user_input: dict[str, Any] = {}
+        self._login_error: str | None = None
 
     @staticmethod
     @callback
@@ -97,13 +126,11 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            # Check for existing entry with same email
             await self.async_set_unique_id(
                 f"{user_input[CONF_EMAIL]}_{user_input.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN)}"
             )
             self._abort_if_unique_id_configured()
 
-            # Validate URL
             ha_url = user_input.get(CONF_HA_URL, "")
             if ha_url and not _validate_url(ha_url):
                 errors[CONF_HA_URL] = "invalid_url"
@@ -112,27 +139,26 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             if public_url and not _validate_url(public_url):
                 errors[CONF_PUBLIC_URL] = "invalid_url"
 
-            # Validate OTP secret
             if not errors:
                 try:
                     normalize_otp_secret(user_input[CONF_OTP_SECRET])
                 except OTPSecretInvalidError:
                     errors[CONF_OTP_SECRET] = "2fa_key_invalid"
 
-            # Check shopping list is available
             if not errors and "shopping_list" not in self.hass.config.components:
                 errors["base"] = "shopping_list_missing"
 
             if not errors:
                 self._user_input = user_input
-                return await self.async_step_proxy_login()
+                return await self.async_step_start_proxy()
 
-        # Determine HA URL default
         ha_url_default = ""
-        if hasattr(self.hass.config, "internal_url") and self.hass.config.internal_url:
-            ha_url_default = self.hass.config.internal_url
-        elif hasattr(self.hass.config, "api") and self.hass.config.api:
-            ha_url_default = f"http://{self.hass.config.api.local_ip}:{self.hass.config.api.port}"
+        try:
+            from homeassistant.helpers.network import get_url
+
+            ha_url_default = get_url(self.hass, prefer_external=False)
+        except Exception:
+            pass
 
         return self.async_show_form(
             step_id="user",
@@ -151,209 +177,205 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_proxy_login(
+    async def async_step_start_proxy(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the proxy login step.
+        """Start the auth capture proxy and redirect user to it.
 
-        This step starts the auth capture proxy and waits for the user to
-        complete login in their browser.
+        Flow: user -> start_proxy -> [external browser] -> check_proxy -> finish_proxy -> sync_options
         """
-        errors: dict[str, str] = {}
-
-        if user_input is not None:
-            # User clicked submit after (hopefully) completing login
-            if self._auth_manager and self._auth_manager.authenticated:
-                return await self.async_step_sync_options()
-
-            # Check if there was a specific login error
-            if self._login_error:
-                errors["base"] = self._login_error
-                self._login_error = None
-            else:
-                errors["base"] = "login_failed"
-
-        # Initialize auth manager and start proxy
-        if self._auth_manager is None:
-            self._auth_manager = AuthManager(
-                hass=self.hass,
-                amazon_domain=self._user_input.get(
-                    CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN
-                ),
-                email=self._user_input[CONF_EMAIL],
-                password=self._user_input[CONF_PASSWORD],
-                otp_secret=self._user_input[CONF_OTP_SECRET],
-            )
-
-        try:
-            proxy_url = await self._async_start_proxy_login()
-        except PasskeyDetectedError:
-            return self.async_abort(reason="passkey_not_supported")
-        except UnsupportedLoginFlowError:
-            errors["base"] = "unsupported_login_flow"
-            proxy_url = None
-        except CaptchaNotCompletedError:
-            errors["base"] = "captcha_not_completed"
-            proxy_url = None
-        except Exception as err:
-            _LOGGER.error("Failed to start proxy login: %s", err, exc_info=True)
-            errors["base"] = "connection_error"
-            proxy_url = None
-
-        if proxy_url is None and not errors:
-            errors["base"] = "connection_error"
-
-        return self.async_show_form(
-            step_id="proxy_login",
-            description_placeholders={
-                "proxy_url": proxy_url or "#",
-            },
-            errors=errors,
-        )
-
-    async def _async_start_proxy_login(self) -> str | None:
-        """Start the auth capture proxy and return URL.
-
-        Decision: We use authcaptureproxy for the proxy-based login flow.
-        The proxy intercepts Amazon's login page, auto-fills OTP codes,
-        and captures the authenticated session cookies.
-
-        If authcaptureproxy is not available or fails, we fall back to a
-        simplified flow that guides the user through manual steps.
-        """
-        assert self._auth_manager is not None
-
-        await self._auth_manager.async_create_session()
-
-        try:
-            from authcaptureproxy import AuthCaptureProxy  # noqa: F811
-
-            return await self._async_run_auth_capture_proxy()
-        except ImportError:
-            _LOGGER.warning(
-                "authcaptureproxy not available, using simplified login flow"
-            )
-            return await self._async_run_simplified_login()
-
-    async def _async_run_auth_capture_proxy(self) -> str | None:
-        """Run auth capture proxy for login.
-
-        This implements the proxy-based login similar to alexa_media_player.
-        The proxy serves Amazon's login page through HA, intercepts form
-        submissions, auto-fills OTP, and captures session cookies.
-        """
-        assert self._auth_manager is not None
-
-        try:
-            from authcaptureproxy import AuthCaptureProxy
-
-            ha_url = self._user_input.get(CONF_HA_URL, "")
-            public_url = self._user_input.get(CONF_PUBLIC_URL, "")
-            amazon_domain = self._user_input.get(
-                CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN
-            )
-
-            # Use public URL if available, otherwise HA URL
-            proxy_base = public_url or ha_url
-            if not proxy_base:
-                proxy_base = "http://homeassistant.local:8123"
-
-            login_url = f"https://www.{amazon_domain}/ap/signin"
-
-            proxy = AuthCaptureProxy(
-                proxy_base,
-                login_url,
-                self._auth_manager.session,
-            )
-
-            # Configure OTP auto-fill callback
-            otp_secret = self._user_input[CONF_OTP_SECRET]
-
-            def otp_callback() -> str:
-                return self._auth_manager.get_otp_code()
-
-            # Register the test function for detecting successful auth
-            def check_auth_complete(resp_url: str, resp_text: str) -> bool:
-                """Check if auth is complete by examining response."""
-                # Successful login typically redirects to alexa.amazon.de
-                if "alexa" in resp_url and "signin" not in resp_url:
-                    return True
-                # Check for success indicators in page
-                if "action=sign-out" in resp_text.lower():
-                    return True
-                return False
-
-            # Check for unsupported flows in page content
-            def check_response(resp_url: str, resp_text: str) -> str | None:
-                """Inspect response for unsupported flows."""
-                try:
-                    check_page_for_unsupported_flow(resp_text)
-                except PasskeyDetectedError as err:
-                    self._login_error = "passkey_not_supported"
-                    return str(err)
-                except UnsupportedLoginFlowError as err:
-                    self._login_error = "unsupported_login_flow"
-                    return str(err)
-
-                if check_page_for_captcha(resp_text):
-                    _LOGGER.debug("CAPTCHA detected on login page")
-
-                return None
-
-            # Set up proxy with callbacks
-            proxy.access_url_callback = check_auth_complete
-            proxy.page_callback = check_response
-
-            # Start proxy
-            proxy_url = await proxy.start_proxy()
-
-            # Store proxy reference for cleanup
-            self._proxy = proxy
-
-            if proxy_url:
-                _LOGGER.debug("Auth proxy started at: %s", proxy_url)
-
-            return proxy_url
-
-        except Exception as err:
-            _LOGGER.error("Auth capture proxy failed: %s", err, exc_info=True)
-            return await self._async_run_simplified_login()
-
-    async def _async_run_simplified_login(self) -> str | None:
-        """Simplified login flow as fallback.
-
-        Decision: If authcaptureproxy is not available, we still need
-        a way to authenticate. This simplified flow directs the user
-        to Amazon's login page and provides instructions for completing
-        auth. This is less seamless but functional.
-
-        In practice, authcaptureproxy should always be available since
-        it's in requirements.
-        """
-        assert self._auth_manager is not None
-
         amazon_domain = self._user_input.get(
             CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN
         )
-        login_url = f"https://www.{amazon_domain}/ap/signin"
+        email = self._user_input[CONF_EMAIL]
+        password = self._user_input[CONF_PASSWORD]
+        otp_secret = normalize_otp_secret(self._user_input[CONF_OTP_SECRET])
 
-        _LOGGER.info(
-            "Using simplified login flow. "
-            "User needs to complete login manually at Amazon."
+        ha_url = self._user_input.get(CONF_HA_URL, "")
+        if not ha_url:
+            try:
+                from homeassistant.helpers.network import get_url
+
+                ha_url = get_url(self.hass, prefer_external=False)
+            except Exception:
+                ha_url = "http://homeassistant.local:8123"
+
+        # Amazon login URL
+        login_url = (
+            f"https://www.{amazon_domain}/ap/signin"
+            f"?openid.pape.max_auth_age=0"
+            f"&openid.return_to=https%3A%2F%2Fwww.{amazon_domain}%2F"
+            f"&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
+            f"&openid.assoc_handle=deflex"
+            f"&openid.mode=checkid_setup"
+            f"&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
+            f"&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&"
         )
 
-        return login_url
+        proxy_base_url = str(URL(ha_url).with_path(AUTH_PROXY_PATH))
+
+        if not self._proxy:
+            try:
+                self._proxy = AuthCaptureProxy(
+                    URL(proxy_base_url),
+                    URL(login_url),
+                )
+                self._proxy.session_factory = lambda: httpx.AsyncClient(
+                    timeout=httpx.Timeout(
+                        connect=30.0, read=120.0, write=30.0, pool=30.0
+                    ),
+                )
+            except ValueError as ex:
+                _LOGGER.error("Failed to create proxy: %s", ex)
+                return self.async_show_form(
+                    step_id="user",
+                    errors={"base": "invalid_url"},
+                )
+
+        # Configure test: detect successful login
+        self._proxy.tests = {
+            "test_login_success": self._test_login_success,
+        }
+
+        # Configure modifier: autofill email, password, OTP
+        self._proxy.modifiers = {
+            "autofill": partial(
+                _autofill,
+                {
+                    "email": email,
+                    "password": password,
+                    "otpCode": generate_otp(otp_secret),
+                },
+            ),
+        }
+
+        # Register HA views for proxy and callback
+        if not self._proxy_view:
+            self._proxy_view = AlexaShoppingProxyView(self._proxy.all_handler)
+        else:
+            self._proxy_view.handler = self._proxy.all_handler
+
+        self.hass.http.register_view(AlexaShoppingCallbackView())
+        self.hass.http.register_view(self._proxy_view)
+
+        # Build callback URL that HA will hit when login succeeds
+        callback_url = (
+            URL(ha_url)
+            .with_path(AUTH_CALLBACK_PATH)
+            .with_query({"flow_id": self.flow_id})
+        )
+
+        # Build proxy URL with flow ID and callback
+        proxy_url = self._proxy.access_url().with_query(
+            {"config_flow_id": self.flow_id, "callback_url": str(callback_url)}
+        )
+
+        _LOGGER.debug("Proxy started, directing user to: %s", proxy_url)
+
+        # Use external step: opens browser, waits for callback
+        return self.async_external_step(
+            step_id="check_proxy", url=str(proxy_url)
+        )
+
+    async def _test_login_success(
+        self, resp: httpx.Response, data: dict, query: dict
+    ) -> Optional[Union[URL, str]]:
+        """Test if Amazon login was successful.
+
+        Called by authcaptureproxy for each response.
+        Returns a URL to redirect to on success, None to continue.
+        """
+        if not resp.url:
+            return None
+
+        resp_url = URL(str(resp.url))
+        resp_path = resp_url.path
+
+        # Check for passkey indicators in response
+        try:
+            text = resp.text
+            check_page_for_unsupported_flow(text)
+        except PasskeyDetectedError:
+            self._login_error = "passkey_not_supported"
+            _LOGGER.error("Passkey flow detected - not supported")
+        except UnsupportedLoginFlowError:
+            self._login_error = "unsupported_login_flow"
+            _LOGGER.error("Unsupported Amazon login flow detected")
+        except Exception:
+            pass
+
+        # Successful login lands on /ap/maplanding or /spa/index.html
+        # or the main amazon page after successful auth
+        if resp_path in ["/ap/maplanding", "/spa/index.html"]:
+            _LOGGER.info("Amazon login successful (path: %s)", resp_path)
+            config_flow_id = self._proxy.init_query.get("config_flow_id")
+            callback_url = self._proxy.init_query.get("callback_url")
+
+            await self._proxy.reset_data()
+
+            if callback_url:
+                return URL(callback_url)
+            return (
+                f"Successfully logged in for flow {config_flow_id}. "
+                "Please close this window."
+            )
+
+        # Also check if we ended up on the main site (authenticated)
+        if (
+            "action=sign-out" in resp.text.lower()
+            or resp_path == "/"
+            and "session-id" in str(resp.headers.get("set-cookie", ""))
+        ):
+            _LOGGER.info("Amazon login successful (main page)")
+            callback_url = self._proxy.init_query.get("callback_url")
+            await self._proxy.reset_data()
+            if callback_url:
+                return URL(callback_url)
+            return "Login successful. Please close this window."
+
+        return None
+
+    async def async_step_check_proxy(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Check proxy result after callback.
+
+        This step is reached when the callback URL is hit (login success)
+        or when the user manually returns.
+        """
+        if self._proxy_view:
+            self._proxy_view.reset()
+
+        if self._login_error:
+            error = self._login_error
+            self._login_error = None
+            return self.async_abort(reason=error)
+
+        return self.async_external_step_done(next_step_id="finish_proxy")
+
+    async def async_step_finish_proxy(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Finish proxy login and extract session cookies."""
+        if self._proxy and self._proxy.session:
+            # Extract cookies from the httpx session
+            cookies = dict(self._proxy.session.cookies)
+            if cookies:
+                _LOGGER.debug(
+                    "Captured %d session cookies from proxy", len(cookies)
+                )
+                self._user_input["_cookies"] = cookies
+                return await self.async_step_sync_options()
+
+        _LOGGER.error("No session cookies captured after proxy login")
+        return self.async_abort(reason="login_failed")
 
     async def async_step_sync_options(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle sync options step."""
         if user_input is not None:
-            # Merge all config data
-            full_config = {
-                **self._user_input,
-                **user_input,
-            }
+            full_config = {**self._user_input, **user_input}
 
             return self.async_create_entry(
                 title=f"Alexa ({self._user_input.get(CONF_EMAIL, 'unknown')})",
@@ -398,8 +420,8 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                     ): vol.In(
                         {
                             SyncMode.TWO_WAY: "Two-way sync",
-                            SyncMode.ALEXA_TO_HA: "Alexa → Home Assistant",
-                            SyncMode.HA_TO_ALEXA: "Home Assistant → Alexa",
+                            SyncMode.ALEXA_TO_HA: "Alexa \u2192 Home Assistant",
+                            SyncMode.HA_TO_ALEXA: "Home Assistant \u2192 Alexa",
                         }
                     ),
                     vol.Required(
@@ -445,26 +467,106 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Handle reauth confirmation step."""
         if user_input is not None:
-            # Update credentials
             self._user_input.update(user_input)
-            # Attempt proxy login with updated creds
-            return await self.async_step_proxy_login()
+            return await self.async_step_start_proxy()
 
         return self.async_show_form(
             step_id="reauth_confirm",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_PASSWORD,
-                        default="",
-                    ): str,
-                    vol.Required(
-                        CONF_OTP_SECRET,
-                        default="",
-                    ): str,
+                    vol.Required(CONF_PASSWORD, default=""): str,
+                    vol.Required(CONF_OTP_SECRET, default=""): str,
                 }
             ),
         )
+
+
+# ---------------------------------------------------------------------------
+# HA Views for proxy routing
+# ---------------------------------------------------------------------------
+
+
+class AlexaShoppingCallbackView(HomeAssistantView):
+    """Handle callback from proxy when login succeeds."""
+
+    url = AUTH_CALLBACK_PATH
+    name = AUTH_CALLBACK_NAME
+    requires_auth = False
+
+    async def get(self, request: web.Request) -> web.Response:
+        """Receive authorization confirmation."""
+        hass = request.app["hass"]
+        try:
+            await hass.config_entries.flow.async_configure(
+                flow_id=request.query["flow_id"], user_input=None
+            )
+        except (KeyError, UnknownFlow) as ex:
+            _LOGGER.debug("Callback flow_id is invalid: %s", ex)
+            raise HTTPBadRequest() from ex
+        return web_response.Response(
+            headers={"content-type": "text/html"},
+            text="<script>window.close()</script>Success! This window can be closed.",
+        )
+
+
+class AlexaShoppingProxyView(HomeAssistantView):
+    """Route proxy requests through HA's HTTP server."""
+
+    url: str = AUTH_PROXY_PATH
+    extra_urls: list[str] = [f"{AUTH_PROXY_PATH}/{{tail:.*}}"]
+    name: str = AUTH_PROXY_NAME
+    requires_auth: bool = False
+    handler: web.RequestHandler = None
+    known_ips: dict[str, datetime.datetime] = {}
+    auth_seconds: int = 300
+
+    def __init__(self, handler: web.RequestHandler) -> None:
+        """Initialize proxy view."""
+        AlexaShoppingProxyView.handler = handler
+        for method in ("get", "post", "delete", "put", "patch", "head", "options"):
+            setattr(self, method, self.check_auth())
+
+    def reset(self) -> None:
+        """Reset known IPs."""
+        self.known_ips.clear()
+
+    @classmethod
+    def check_auth(cls):
+        """Wrap authentication check into the handler.
+
+        Only allows requests from IPs that provided a valid config_flow_id
+        within the last auth_seconds.
+        """
+
+        async def wrapped(request: web.Request, **kwargs: Any) -> web.Response:
+            """Check auth and forward to proxy handler."""
+            hass = request.app["hass"]
+            remote = request.remote
+
+            if (
+                remote not in cls.known_ips
+                or (datetime.datetime.now() - cls.known_ips[remote]).seconds
+                > cls.auth_seconds
+            ):
+                try:
+                    flow_id = request.url.query["config_flow_id"]
+                except KeyError as ex:
+                    raise Unauthorized() from ex
+
+                success = False
+                for flow in hass.config_entries.flow.async_progress():
+                    if flow["flow_id"] == flow_id:
+                        success = True
+                        break
+
+                if not success:
+                    raise Unauthorized()
+
+                cls.known_ips[remote] = datetime.datetime.now()
+
+            return await cls.handler(request)
+
+        return wrapped
 
 
 class AlexaShoppingOptionsFlow(OptionsFlow):
@@ -493,8 +595,8 @@ class AlexaShoppingOptionsFlow(OptionsFlow):
                     ): vol.In(
                         {
                             SyncMode.TWO_WAY: "Two-way sync",
-                            SyncMode.ALEXA_TO_HA: "Alexa → Home Assistant",
-                            SyncMode.HA_TO_ALEXA: "Home Assistant → Alexa",
+                            SyncMode.ALEXA_TO_HA: "Alexa \u2192 Home Assistant",
+                            SyncMode.HA_TO_ALEXA: "Home Assistant \u2192 Alexa",
                         }
                     ),
                     vol.Required(
