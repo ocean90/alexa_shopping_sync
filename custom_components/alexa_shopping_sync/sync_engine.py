@@ -839,12 +839,27 @@ class SyncEngine:
         return result
 
     async def async_full_resync(self) -> SyncResult:
-        """Clear mappings and perform a complete resync."""
-        _LOGGER.info("Performing full resync")
-        await self.async_clear_state()
+        """Clear mappings and perform a complete resync.
 
+        Fetches both lists FIRST before clearing state so that a failed
+        API call does not leave the state file empty (which would trigger
+        a broken initial sync on next reload).
+        """
+        _LOGGER.info("Performing full resync")
+
+        # Fetch both sides before touching state — if either fails we keep
+        # the existing state intact and the exception propagates.
         alexa_items = await self._amazon.async_get_snapshot()
         ha_items = await self._ha.async_get_items()
+
+        _LOGGER.debug(
+            "Full resync: %d Alexa items, %d HA items",
+            len(alexa_items),
+            len(ha_items),
+        )
+
+        # Safe to clear now — both fetches succeeded.
+        await self.async_clear_state()
 
         result = await self.async_initial_sync(alexa_items, ha_items)
 
@@ -852,4 +867,11 @@ class SyncEngine:
         self._previous_ha_items = ha_items
 
         await self.async_save_state()
+
+        _LOGGER.info(
+            "Full resync complete: +%d HA, +%d Alexa, %d mappings",
+            result.alexa_to_ha_adds,
+            result.ha_to_alexa_adds,
+            len(self._state.mappings),
+        )
         return result
