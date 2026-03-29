@@ -240,6 +240,44 @@ async def test_poll_after_full_resync_no_duplicates():
     check("ha_bridge not called again", ha_bridge.async_add_item.call_count == 0)
 
 
+async def test_warm_start_unmapped_alexa_item():
+    """Warm start with an unmapped Alexa item → it should sync to HA."""
+    print("\n[test_warm_start_unmapped_alexa_item]")
+    engine, amazon, ha_bridge = make_engine()
+
+    engine._initial_sync_done = True
+    engine._add_mapping("a1", "h1", "Kaffee", ItemSource.ALEXA)
+    # a2 has NO mapping — added after last restart, before first poll
+
+    ha_bridge.async_add_item.return_value = ha("h2", "Milch")
+    alexa_items = [alexa("a1", "Kaffee"), alexa("a2", "Milch")]
+
+    result = await engine.async_sync_alexa_to_ha(alexa_items)
+
+    check("unmapped item synced to HA", result.alexa_to_ha_adds == 1, str(result.alexa_to_ha_adds))
+    ha_bridge.async_add_item.assert_called_once_with("Milch", False)
+    check("2 mappings after warm start", len(engine.state.mappings) == 2, str(len(engine.state.mappings)))
+
+
+async def test_warm_start_unmapped_ha_item():
+    """Warm start with an unmapped HA item → it should sync to Alexa."""
+    print("\n[test_warm_start_unmapped_ha_item]")
+    engine, amazon, ha_bridge = make_engine()
+
+    engine._initial_sync_done = True
+    engine._add_mapping("a1", "h1", "Kaffee", ItemSource.ALEXA)
+    # h2 has NO mapping — added after last restart, before first event
+
+    amazon.async_add_item.return_value = alexa("a2", "Milch")
+    ha_items = [ha("h1", "Kaffee"), ha("h2", "Milch")]
+
+    result = await engine.async_sync_ha_to_alexa(ha_items)
+
+    check("unmapped item synced to Alexa", result.ha_to_alexa_adds == 1, str(result.ha_to_alexa_adds))
+    amazon.async_add_item.assert_called_once_with("Milch", False)
+    check("2 mappings after warm start", len(engine.state.mappings) == 2, str(len(engine.state.mappings)))
+
+
 async def test_new_item_after_warm_start():
     """After warm start, NEW items added to Alexa should sync to HA."""
     print("\n[test_new_item_after_warm_start]")
@@ -268,6 +306,8 @@ async def run_all():
     await test_initial_sync_matching()
     await test_warm_start_no_duplicates()
     await test_warm_start_ha_side()
+    await test_warm_start_unmapped_alexa_item()
+    await test_warm_start_unmapped_ha_item()
     await test_full_resync_no_duplicates()
     await test_poll_after_full_resync_no_duplicates()
     await test_new_item_after_warm_start()

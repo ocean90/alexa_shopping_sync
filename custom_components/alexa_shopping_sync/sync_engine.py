@@ -571,14 +571,41 @@ class SyncEngine:
             return result
 
         # Warm start: after HA restart _previous_alexa_items is empty but
-        # initial sync already ran (state loaded from storage). Treat current
-        # snapshot as baseline so we don't mistakenly add all items again.
+        # initial sync already ran (state loaded from storage).
+        # Items with an existing mapping are already known — skip them.
+        # Items WITHOUT a mapping are genuinely new and must be synced.
         if not self._previous_alexa_items:
+            unmapped = [
+                item for item in alexa_items
+                if not self._find_mapping_by_alexa_id(item.item_id)
+            ]
             _LOGGER.debug(
-                "Warm start: setting %d Alexa items as baseline (no diff)",
+                "Warm start: %d Alexa items total, %d unmapped (will sync)",
                 len(alexa_items),
+                len(unmapped),
             )
             self._previous_alexa_items = alexa_items
+            if not unmapped:
+                return result
+            self._cleanup_expired_pending_ops()
+            for item in unmapped:
+                if self._is_echo(PendingOpType.ADD, item.name, item.item_id):
+                    result.skipped_echo += 1
+                    continue
+                if not self._mirror_completed and item.complete:
+                    continue
+                try:
+                    ha_item = await self._ha.async_add_item(item.name, item.complete)
+                    if ha_item:
+                        self._add_mapping(
+                            item.item_id, ha_item.item_id, item.name, ItemSource.ALEXA
+                        )
+                        self.add_pending_op(
+                            PendingOpType.ADD, ItemSource.ALEXA, item.name, ha_item.item_id
+                        )
+                        result.alexa_to_ha_adds += 1
+                except Exception as err:
+                    result.errors.append(f"Add to HA (warm start): {err}")
             return result
 
         diff = self._diff_alexa_snapshots(self._previous_alexa_items, alexa_items)
@@ -720,13 +747,40 @@ class SyncEngine:
             self._previous_ha_items = ha_items
             return result
 
-        # Warm start: same as Alexa side — avoid treating all items as new.
+        # Warm start: same as Alexa side — items with a mapping are known,
+        # items WITHOUT a mapping are genuinely new and must be synced.
         if not self._previous_ha_items:
+            unmapped = [
+                item for item in ha_items
+                if not self._find_mapping_by_ha_id(item.item_id)
+            ]
             _LOGGER.debug(
-                "Warm start: setting %d HA items as baseline (no diff)",
+                "Warm start: %d HA items total, %d unmapped (will sync)",
                 len(ha_items),
+                len(unmapped),
             )
             self._previous_ha_items = ha_items
+            if not unmapped:
+                return result
+            self._cleanup_expired_pending_ops()
+            for item in unmapped:
+                if self._is_echo(PendingOpType.ADD, item.name, item.item_id):
+                    result.skipped_echo += 1
+                    continue
+                if not self._mirror_completed and item.complete:
+                    continue
+                try:
+                    alexa_item = await self._amazon.async_add_item(item.name, item.complete)
+                    if alexa_item:
+                        self._add_mapping(
+                            alexa_item.item_id, item.item_id, item.name, ItemSource.HA
+                        )
+                        self.add_pending_op(
+                            PendingOpType.ADD, ItemSource.HA, item.name, alexa_item.item_id
+                        )
+                        result.ha_to_alexa_adds += 1
+                except Exception as err:
+                    result.errors.append(f"Add to Alexa (warm start): {err}")
             return result
 
         diff = self._diff_ha_snapshots(self._previous_ha_items, ha_items)
