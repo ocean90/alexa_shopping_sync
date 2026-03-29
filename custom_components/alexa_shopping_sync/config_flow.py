@@ -299,9 +299,8 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             config_flow_id = self._proxy.init_query.get("config_flow_id")
             callback_url = self._proxy.init_query.get("callback_url")
 
-            # Capture cookies before reset_data() clears the session
+            self._login_error = None  # clear any earlier false-positive
             self._captured_cookies = self._extract_proxy_cookies(resp)
-
             await self._proxy.reset_data()
 
             if callback_url:
@@ -319,6 +318,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         ):
             _LOGGER.info("Amazon login successful (main page)")
             callback_url = self._proxy.init_query.get("callback_url")
+            self._login_error = None  # clear any earlier false-positive
             self._captured_cookies = self._extract_proxy_cookies(resp)
             await self._proxy.reset_data()
             if callback_url:
