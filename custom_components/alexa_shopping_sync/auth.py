@@ -185,7 +185,16 @@ class AuthManager:
         self._authenticated = True
         if cookies:
             self._cookies.update(cookies)
-        _LOGGER.debug("Session marked as authenticated")
+            # Inject cookies into the aiohttp session cookie jar
+            if self._session is not None:
+                from yarl import URL
+
+                self._session.cookie_jar.update_cookies(
+                    cookies, URL(self._base_url)
+                )
+        _LOGGER.debug(
+            "Session marked as authenticated (cookies=%d)", len(cookies or {})
+        )
 
     def mark_session_expired(self) -> None:
         """Mark the session as expired."""

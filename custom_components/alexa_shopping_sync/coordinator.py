@@ -176,9 +176,14 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Create session (auth will happen via proxy in config flow)
         await self._auth_manager.async_create_session()
 
-        # If we have stored cookies/session, mark as potentially authenticated
-        # The first poll will verify if session is still valid
-        if self._sync_engine.state.shopping_list_id:
+        # Restore session cookies captured during config flow proxy login
+        saved_cookies: dict[str, str] = data.get("_cookies", {})
+        if saved_cookies:
+            self._auth_manager.mark_authenticated(saved_cookies)
+            _LOGGER.debug("Restored %d session cookies from config entry", len(saved_cookies))
+        elif self._sync_engine.state.shopping_list_id:
+            # Fallback: if we have a known shopping list ID from previous runs,
+            # optimistically mark authenticated; first poll will verify.
             self._auth_manager.mark_authenticated()
 
     @callback
@@ -381,7 +386,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self.hass,
             DOMAIN,
             "reauth_needed",
-            is_fixable=True,
+            is_fixable=False,
             severity=ir.IssueSeverity.ERROR,
             translation_key="reauth_needed",
         )

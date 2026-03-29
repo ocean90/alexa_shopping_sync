@@ -423,6 +423,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_OTP_SECRET: full_config[CONF_OTP_SECRET],
                     CONF_HA_URL: full_config.get(CONF_HA_URL, ""),
                     CONF_PUBLIC_URL: full_config.get(CONF_PUBLIC_URL, ""),
+                    "_cookies": full_config.get("_cookies", {}),
                 },
                 options={
                     CONF_SYNC_MODE: full_config.get(
