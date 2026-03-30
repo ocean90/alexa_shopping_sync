@@ -390,24 +390,34 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         If successful the new cookies are persisted to the config entry so
         they survive an HA restart.  Returns True when re-auth succeeded.
+        Always returns False on any exception — must never raise, because it
+        is called from inside an except-handler and an unhandled exception
+        there would bypass the remaining except-clauses.
         """
         if not self._auth_manager:
             return False
 
-        success = await self._auth_manager.async_try_silent_relogin()
-        if not success:
+        try:
+            success = await self._auth_manager.async_try_silent_relogin()
+            if not success:
+                return False
+
+            # Persist new cookies so they survive HA restarts
+            new_cookies = self._auth_manager.extract_cookies_dict()
+            if new_cookies:
+                self.hass.config_entries.async_update_entry(
+                    self._entry,
+                    data={**self._entry.data, "_cookies": new_cookies},
+                )
+                _LOGGER.debug(
+                    "Persisted %d new cookies after silent re-auth", len(new_cookies)
+                )
+
+            return True
+
+        except Exception as err:
+            _LOGGER.error("Unexpected error during silent session refresh: %s", err)
             return False
-
-        # Persist new cookies so they survive HA restarts
-        new_cookies = self._auth_manager.extract_cookies_dict()
-        if new_cookies:
-            self.hass.config_entries.async_update_entry(
-                self._entry,
-                data={**self._entry.data, "_cookies": new_cookies},
-            )
-            _LOGGER.debug("Persisted %d new cookies after silent re-auth", len(new_cookies))
-
-        return True
 
     def _trigger_reauth(self) -> None:
         """Trigger reauth flow."""

@@ -179,12 +179,20 @@ class AuthManager:
         self._authenticated = False
 
     def mark_authenticated(self, cookies: dict[str, str] | None = None) -> None:
-        """Mark the session as authenticated after proxy login completes."""
+        """Mark the session as authenticated after proxy login completes.
+
+        Clears existing session cookies before applying new ones to prevent
+        httpx.CookieConflict: Amazon sends Set-Cookie headers (with domain
+        info) even on 401 responses, which creates duplicate entries alongside
+        our domain-less restored cookies.
+        """
         self._authenticated = True
         if cookies:
             self._cookies.update(cookies)
             if self._session is not None:
-                self._session.cookies.update(cookies)
+                self._session.cookies.clear()
+                for k, v in cookies.items():
+                    self._session.cookies.set(k, v)
         _LOGGER.debug(
             "Session marked as authenticated (cookies=%d)", len(cookies or {})
         )
@@ -219,10 +227,15 @@ class AuthManager:
         return False
 
     def extract_cookies_dict(self) -> dict[str, str]:
-        """Extract cookies from session as dict (no secrets logged)."""
+        """Extract cookies from session as dict (no secrets logged).
+
+        Uses .items() rather than dict() to avoid httpx.CookieConflict when
+        multiple cookies share the same name across different domains.
+        Last value wins for each name, which is acceptable for persistence.
+        """
         if not self._session:
             return {}
-        return dict(self._session.cookies)
+        return {k: v for k, v in self._session.cookies.items()}
 
     async def async_get_authenticated_session(self) -> httpx.AsyncClient:
         """Return the authenticated httpx session or raise."""
@@ -292,14 +305,15 @@ class AuthManager:
                     _LOGGER.debug("Silent relogin: CAPTCHA detected, falling back to manual reauth")
                     return False
 
-                # Step 5: Transfer new cookies into main session
-                new_cookies = dict(tmp.cookies)
+                # Step 5: Transfer new cookies into main session.
+                # Use .items() (not dict()) to avoid CookieConflict from
+                # duplicate cookie names across different domains.
+                new_cookies = {k: v for k, v in tmp.cookies.items()}
                 if not new_cookies:
                     _LOGGER.debug("Silent relogin: no cookies captured")
                     return False
 
-                if self._session:
-                    self._session.cookies.update(new_cookies)
+                # mark_authenticated clears old cookies before adding new ones
                 self.mark_authenticated(new_cookies)
                 _LOGGER.info(
                     "Silent re-authentication succeeded (%d cookies)", len(new_cookies)
