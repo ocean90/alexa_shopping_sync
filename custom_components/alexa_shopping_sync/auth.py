@@ -496,22 +496,27 @@ class AuthManager:
 
 async def async_register_device(
     amazon_domain: str,
-    access_token: str,
     device_serial: str,
     cookies: dict[str, str],
+    access_token: str | None = None,
 ) -> str | None:
     """Register this client as an Amazon device and return the refresh token.
 
-    Called once after the initial proxy login captures an OAuth access_token
-    from the /ap/maplanding redirect.  The long-lived refresh_token returned
-    here is stored in the config entry and used by async_try_token_exchange()
-    for all future silent session renewals — no metadata1 required.
+    Called once after the initial proxy login.  Authenticates via the captured
+    session cookies (website_cookies) — no OAuth access_token required.  The
+    long-lived refresh_token returned here is stored in the config entry and
+    used by async_try_token_exchange() for all future silent session renewals
+    (no metadata1 browser fingerprint needed).
 
     Returns the refresh_token string on success, None on failure (non-fatal:
     the integration will fall back to programmatic login).
     """
     url = AMAZON_REGISTER_DEVICE_URL_TEMPLATE.format(domain=amazon_domain)
     website_cookies = [{"Name": k, "Value": v} for k, v in cookies.items()]
+
+    auth_data: dict[str, Any] = {}
+    if access_token:
+        auth_data["access_token"] = access_token
 
     payload = {
         "requested_extensions": ["device_info", "customer_info"],
@@ -529,9 +534,7 @@ async def async_register_device(
             "os_version": AMAZON_OS_VERSION,
             "software_version": AMAZON_SOFTWARE_VERSION,
         },
-        "auth_data": {
-            "access_token": access_token,
-        },
+        "auth_data": auth_data,
         "user_context_map": {
             "frc": "",
         },
