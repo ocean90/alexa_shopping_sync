@@ -275,8 +275,15 @@ class AuthManager:
             ) as tmp:
                 # Step 1: Load sign-in page
                 resp = await tmp.get(signin_url)
+                _LOGGER.debug(
+                    "Silent relogin step 1: signin page status=%d url=%s",
+                    resp.status_code,
+                    resp.url,
+                )
                 if resp.status_code != 200:
-                    _LOGGER.debug("Silent relogin: signin page returned %d", resp.status_code)
+                    _LOGGER.warning(
+                        "Silent relogin failed: signin page returned %d", resp.status_code
+                    )
                     return False
 
                 # Step 2: Submit email + password
@@ -284,33 +291,61 @@ class AuthManager:
                     tmp, resp, {"email": self._email, "password": self._password}
                 )
                 if resp is None:
-                    _LOGGER.debug("Silent relogin: could not find login form")
+                    _LOGGER.warning(
+                        "Silent relogin failed: could not find login form on signin page"
+                    )
                     return False
+                _LOGGER.debug(
+                    "Silent relogin step 2: after credentials status=%d url=%s",
+                    resp.status_code,
+                    resp.url,
+                )
 
                 # Step 3: Handle OTP challenge if present
                 if "otpCode" in resp.text or "one-time" in resp.text.lower():
+                    _LOGGER.debug("Silent relogin step 3: OTP challenge detected")
                     resp = await self._async_submit_form(
                         tmp, resp, {"otpCode": generate_otp(self._otp_secret)}
                     )
                     if resp is None:
-                        _LOGGER.debug("Silent relogin: could not find OTP form")
+                        _LOGGER.warning("Silent relogin failed: could not find OTP form")
                         return False
+                    _LOGGER.debug(
+                        "Silent relogin step 3: after OTP status=%d url=%s",
+                        resp.status_code,
+                        resp.url,
+                    )
+                else:
+                    _LOGGER.debug("Silent relogin step 3: no OTP challenge detected")
 
                 # Step 4: Detect failure states
                 final_url = str(resp.url)
                 if "/ap/signin" in final_url and "signin" in final_url:
-                    _LOGGER.debug("Silent relogin: still on signin page — login failed")
+                    _LOGGER.warning(
+                        "Silent relogin failed: still on signin page after credentials "
+                        "(wrong password, account locked, or unexpected challenge) url=%s",
+                        final_url,
+                    )
                     return False
                 if check_page_for_captcha(resp.text):
-                    _LOGGER.debug("Silent relogin: CAPTCHA detected, falling back to manual reauth")
+                    _LOGGER.warning(
+                        "Silent relogin failed: CAPTCHA detected at url=%s — "
+                        "manual reauth required",
+                        final_url,
+                    )
                     return False
 
                 # Step 5: Transfer new cookies into main session.
                 # Use .items() (not dict()) to avoid CookieConflict from
                 # duplicate cookie names across different domains.
                 new_cookies = {k: v for k, v in tmp.cookies.items()}
+                _LOGGER.debug(
+                    "Silent relogin step 5: captured %d cookies, final url=%s",
+                    len(new_cookies),
+                    final_url,
+                )
                 if not new_cookies:
-                    _LOGGER.debug("Silent relogin: no cookies captured")
+                    _LOGGER.warning("Silent relogin failed: no cookies captured after login")
                     return False
 
                 # mark_authenticated clears old cookies before adding new ones
@@ -321,7 +356,7 @@ class AuthManager:
                 return True
 
         except Exception as err:
-            _LOGGER.warning("Silent re-authentication failed: %s", err)
+            _LOGGER.warning("Silent re-authentication failed with exception: %s", err, exc_info=True)
             return False
 
     async def _async_submit_form(

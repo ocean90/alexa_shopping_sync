@@ -76,6 +76,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._connected = False
         self._alexa_item_count = 0
         self._ha_item_count = 0
+        self._silent_refresh_tried = False
 
         poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         poll_interval = max(poll_interval, MIN_POLL_INTERVAL)
@@ -285,8 +286,24 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             if not self._auth_manager.authenticated:
                 self._connected = False
-                self._trigger_reauth()
-                raise UpdateFailed("Not authenticated - reauth required")
+                # Try silent refresh once when session is lost between polls.
+                # The SessionExpiredError handler covers the initial 401;
+                # this covers every subsequent poll while authenticated=False.
+                if not self._silent_refresh_tried:
+                    self._silent_refresh_tried = True
+                    _LOGGER.info(
+                        "Session not authenticated, attempting silent re-auth before reauth flow"
+                    )
+                    if await self._async_try_silent_refresh():
+                        _LOGGER.info("Silent re-auth succeeded, continuing update")
+                        # fall through to the fetch loop below
+                    else:
+                        self._last_error = "Session expired — re-authentication required"
+                        self._trigger_reauth()
+                        raise UpdateFailed("Not authenticated - reauth required")
+                else:
+                    self._trigger_reauth()
+                    raise UpdateFailed("Not authenticated - reauth required")
 
             # Allow one silent re-auth retry within the same update cycle.
             # Without this, a successful silent refresh would still raise
@@ -317,6 +334,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                     self._connected = True
                     self._consecutive_errors = 0
+                    self._silent_refresh_tried = False
                     self._last_success = str(time.time())
                     self._last_error = ""
 
