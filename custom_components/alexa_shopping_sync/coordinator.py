@@ -344,7 +344,9 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._connected = False
                 if await self._async_try_silent_refresh():
                     _LOGGER.info("Silent re-auth succeeded; next poll will use fresh session")
+                    self._last_error = "Session refreshed silently — retrying"
                     raise UpdateFailed("Session refreshed silently")
+                self._last_error = "Session expired — re-authentication required"
                 self._trigger_reauth()
                 raise UpdateFailed("Session expired - reauth required")
 

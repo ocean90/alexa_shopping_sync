@@ -93,6 +93,16 @@ class AlexaShoppingSensor(
             "model": "Alexa Shopping List",
         }
 
+    # Sensors that should always be readable even when the coordinator fails
+    _ALWAYS_AVAILABLE_KEYS = {"last_error", "last_success"}
+
+    @property
+    def available(self) -> bool:
+        """Return True; diagnostic sensors are always readable."""
+        if self.entity_description.key in self._ALWAYS_AVAILABLE_KEYS:
+            return True
+        return super().available
+
     @callback
     def _handle_coordinator_update(self) -> None:
         """Handle updated data from the coordinator."""
