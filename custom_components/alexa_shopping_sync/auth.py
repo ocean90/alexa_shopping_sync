@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 import httpx
 import pyotp
+from bs4 import BeautifulSoup
 from homeassistant.core import HomeAssistant
 
 from .const import (
@@ -228,3 +229,115 @@ class AuthManager:
         if not self._session or not self._authenticated:
             raise SessionExpiredError("No authenticated session available")
         return self._session
+
+    async def async_try_silent_relogin(self) -> bool:
+        """Silently re-authenticate using stored credentials + TOTP.
+
+        Called when the session expires. Uses a fresh httpx client to go
+        through Amazon's sign-in form programmatically. If Amazon shows a
+        CAPTCHA or any unexpected challenge the method returns False and the
+        caller should fall back to the manual reauth flow.
+
+        On success the new cookies are injected into the main session so
+        subsequent API calls succeed immediately (next poll or mutation).
+        """
+        _LOGGER.info("Attempting silent re-authentication with stored credentials")
+
+        signin_url = (
+            f"https://www.{self._amazon_domain}/ap/signin"
+            f"?openid.pape.max_auth_age=0"
+            f"&openid.return_to=https%3A%2F%2Fwww.{self._amazon_domain}%2F"
+            f"&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
+            f"&openid.assoc_handle=deflex"
+            f"&openid.mode=checkid_setup"
+            f"&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
+            f"&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0"
+        )
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
+                follow_redirects=True,
+                headers={"User-Agent": AMAZON_USER_AGENT},
+            ) as tmp:
+                # Step 1: Load sign-in page
+                resp = await tmp.get(signin_url)
+                if resp.status_code != 200:
+                    _LOGGER.debug("Silent relogin: signin page returned %d", resp.status_code)
+                    return False
+
+                # Step 2: Submit email + password
+                resp = await self._async_submit_form(
+                    tmp, resp, {"email": self._email, "password": self._password}
+                )
+                if resp is None:
+                    _LOGGER.debug("Silent relogin: could not find login form")
+                    return False
+
+                # Step 3: Handle OTP challenge if present
+                if "otpCode" in resp.text or "one-time" in resp.text.lower():
+                    resp = await self._async_submit_form(
+                        tmp, resp, {"otpCode": generate_otp(self._otp_secret)}
+                    )
+                    if resp is None:
+                        _LOGGER.debug("Silent relogin: could not find OTP form")
+                        return False
+
+                # Step 4: Detect failure states
+                final_url = str(resp.url)
+                if "/ap/signin" in final_url and "signin" in final_url:
+                    _LOGGER.debug("Silent relogin: still on signin page — login failed")
+                    return False
+                if check_page_for_captcha(resp.text):
+                    _LOGGER.debug("Silent relogin: CAPTCHA detected, falling back to manual reauth")
+                    return False
+
+                # Step 5: Transfer new cookies into main session
+                new_cookies = dict(tmp.cookies)
+                if not new_cookies:
+                    _LOGGER.debug("Silent relogin: no cookies captured")
+                    return False
+
+                if self._session:
+                    self._session.cookies.update(new_cookies)
+                self.mark_authenticated(new_cookies)
+                _LOGGER.info(
+                    "Silent re-authentication succeeded (%d cookies)", len(new_cookies)
+                )
+                return True
+
+        except Exception as err:
+            _LOGGER.warning("Silent re-authentication failed: %s", err)
+            return False
+
+    async def _async_submit_form(
+        self,
+        client: httpx.AsyncClient,
+        resp: httpx.Response,
+        overrides: dict[str, str],
+    ) -> httpx.Response | None:
+        """Extract form fields from *resp* and POST them with *overrides* applied."""
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        form = (
+            soup.find("form", {"id": "ap-signin-form"})
+            or soup.find("form", {"id": "auth-login-form"})
+            or soup.find("form")
+        )
+        if not form:
+            return None
+
+        action: str = form.get("action", "") or ""
+        if action.startswith("/"):
+            action = f"https://www.{self._amazon_domain}{action}"
+        if not action:
+            action = f"https://www.{self._amazon_domain}/ap/signin"
+
+        fields: dict[str, str] = {}
+        for inp in form.find_all("input"):
+            name = inp.get("name")
+            if name:
+                fields[name] = inp.get("value", "")
+
+        fields.update(overrides)
+        return await client.post(action, data=fields)

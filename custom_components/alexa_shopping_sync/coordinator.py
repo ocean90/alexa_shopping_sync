@@ -267,7 +267,8 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 result.skipped_echo,
             )
         except SessionExpiredError:
-            self._trigger_reauth()
+            if not await self._async_try_silent_refresh():
+                self._trigger_reauth()
         except Exception as err:
             _LOGGER.error("HA->Alexa sync failed: %s", err, exc_info=True)
 
@@ -341,6 +342,9 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             except SessionExpiredError:
                 self._connected = False
+                if await self._async_try_silent_refresh():
+                    _LOGGER.info("Silent re-auth succeeded; next poll will use fresh session")
+                    raise UpdateFailed("Session refreshed silently")
                 self._trigger_reauth()
                 raise UpdateFailed("Session expired - reauth required")
 
@@ -378,6 +382,30 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     )
 
                 raise UpdateFailed(f"Update failed: {err}")
+
+    async def _async_try_silent_refresh(self) -> bool:
+        """Try silent session refresh using stored credentials.
+
+        If successful the new cookies are persisted to the config entry so
+        they survive an HA restart.  Returns True when re-auth succeeded.
+        """
+        if not self._auth_manager:
+            return False
+
+        success = await self._auth_manager.async_try_silent_relogin()
+        if not success:
+            return False
+
+        # Persist new cookies so they survive HA restarts
+        new_cookies = self._auth_manager.extract_cookies_dict()
+        if new_cookies:
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                data={**self._entry.data, "_cookies": new_cookies},
+            )
+            _LOGGER.debug("Persisted %d new cookies after silent re-auth", len(new_cookies))
+
+        return True
 
     def _trigger_reauth(self) -> None:
         """Trigger reauth flow."""
