@@ -69,11 +69,17 @@ PROXY_PORT_RANGE_END: Final = 8799
 AMAZON_REGISTER_DEVICE_URL_TEMPLATE: Final = "https://api.{domain}/auth/register"
 AMAZON_EXCHANGE_TOKEN_URL_TEMPLATE: Final = "https://www.{domain}/ap/exchangetoken/cookies"
 AMAZON_DEVICE_TYPE: Final = "A2IVLV5VM2W81"
-AMAZON_APP_NAME: Final = "HA Alexa Shopping Sync"
-AMAZON_APP_VERSION: Final = "2.2.345247.0"
-AMAZON_DEVICE_MODEL: Final = "Echo"
-AMAZON_OS_VERSION: Final = "10.11.1"
-AMAZON_SOFTWARE_VERSION: Final = "130050020"
+AMAZON_APP_NAME: Final = "Alexa Media Player"
+# Version constants match alexapy CALL_VERSION — required for Amazon to accept
+# the device registration and token exchange requests.
+AMAZON_APP_VERSION: Final = "2.2.556530.0"
+AMAZON_DEVICE_MODEL: Final = "iPhone"
+AMAZON_OS_VERSION: Final = "16.6"
+AMAZON_SOFTWARE_VERSION: Final = "1"
+# User-Agent for device registration / token exchange (AmazonWebView format)
+AMAZON_USER_AGENT_DEVICE: Final = (
+    f"AmazonWebView/Amazon Alexa/2.2.556530.0/iOS/16.6/iPhone"
+)
 
 # Passkey / unsupported flow detection patterns
 PASSKEY_INDICATORS: Final = (

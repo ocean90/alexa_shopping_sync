@@ -340,10 +340,19 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                 check_page_for_unsupported_flow(resp.text)
             except PasskeyDetectedError:
                 self._login_error = "passkey_not_supported"
-                _LOGGER.error("Passkey flow detected - not supported")
+                # WARNING not ERROR: Amazon's login pages often mention "passkey"
+                # even when password auth is in progress — this may be a false
+                # positive that gets cleared when the success page is reached.
+                _LOGGER.warning(
+                    "Passkey indicator detected on %s (may be false positive — "
+                    "will be cleared if login completes successfully)",
+                    resp_path,
+                )
             except UnsupportedLoginFlowError:
                 self._login_error = "unsupported_login_flow"
-                _LOGGER.error("Unsupported Amazon login flow detected")
+                _LOGGER.warning(
+                    "Unsupported Amazon login flow detected on %s", resp_path
+                )
             except Exception:
                 pass
 

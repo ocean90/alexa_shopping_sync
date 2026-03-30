@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import secrets
 from typing import Any
 from urllib.parse import urlparse
 
@@ -24,6 +25,7 @@ from .const import (
     AMAZON_REGISTER_DEVICE_URL_TEMPLATE,
     AMAZON_SOFTWARE_VERSION,
     AMAZON_USER_AGENT,
+    AMAZON_USER_AGENT_DEVICE,
     CAPTCHA_INDICATORS,
     HTTP_TIMEOUT,
     PASSKEY_INDICATORS,
@@ -266,9 +268,9 @@ class AuthManager:
     async def async_try_token_exchange(self) -> bool:
         """Exchange the stored refresh token for fresh session cookies.
 
-        Uses Amazon's /ap/exchangetoken/cookies endpoint.  Unlike headless
-        form-fill login this call does NOT require the metadata1 browser
-        fingerprint, so it works reliably from server-side code.
+        Uses Amazon's /ap/exchangetoken/cookies endpoint with the exact payload
+        format from alexapy.  The response is JSON (not HTTP Set-Cookie headers).
+        Does NOT require the metadata1 browser fingerprint.
 
         Returns True on success (session marked authenticated), False otherwise.
         """
@@ -278,34 +280,87 @@ class AuthManager:
         url = AMAZON_EXCHANGE_TOKEN_URL_TEMPLATE.format(domain=self._amazon_domain)
         _LOGGER.warning("Attempting silent session renewal via token exchange")
 
+        data = {
+            "app_name": AMAZON_APP_NAME,
+            "app_version": AMAZON_APP_VERSION,
+            "di.sdk.version": "6.12.4",
+            "domain": f".{self._amazon_domain}",
+            "source_token": self._refresh_token,
+            "package_name": "com.amazon.echo",
+            "di.hw.version": AMAZON_DEVICE_MODEL,
+            "platform": "iOS",
+            "requested_token_type": "auth_cookies",
+            "source_token_type": "refresh_token",
+            "di.os.name": "iOS",
+            "di.os.version": AMAZON_OS_VERSION,
+            "current_version": "6.12.4",
+            "previous_version": "6.12.4",
+        }
+
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
-                follow_redirects=True,
-                headers={"User-Agent": AMAZON_USER_AGENT},
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": AMAZON_USER_AGENT_DEVICE,
+                },
             ) as client:
-                resp = await client.post(
-                    url,
-                    data={
-                        "domain": f".{self._amazon_domain}",
-                        "auth_tokens[]": self._refresh_token,
-                    },
-                )
+                resp = await client.post(url, data=data)
                 _LOGGER.debug(
-                    "Token exchange: status=%d url=%s",
-                    resp.status_code,
-                    resp.url,
+                    "Token exchange: status=%d url=%s", resp.status_code, resp.url
                 )
 
-                if resp.status_code not in (200, 302):
+                if resp.status_code != 200:
                     _LOGGER.warning(
-                        "Token exchange failed: status=%d", resp.status_code
+                        "Token exchange failed: status=%d body=%s",
+                        resp.status_code,
+                        resp.text[:200],
                     )
                     return False
 
-                new_cookies = {k: v for k, v in client.cookies.items()}
+                # Response is JSON, not HTTP Set-Cookie headers
+                try:
+                    response_json = resp.json()
+                except Exception:
+                    _LOGGER.warning(
+                        "Token exchange: failed to parse JSON response: %s",
+                        resp.text[:200],
+                    )
+                    return False
+
+                cookies_by_domain = (
+                    response_json.get("response", {})
+                    .get("tokens", {})
+                    .get("cookies", {})
+                )
+                if not cookies_by_domain:
+                    _LOGGER.warning(
+                        "Token exchange: no cookies in response: %s",
+                        str(response_json)[:200],
+                    )
+                    return False
+
+                new_cookies: dict[str, str] = {}
+                for domain, cookie_list in cookies_by_domain.items():
+                    for item in cookie_list:
+                        name = item.get("Name", "")
+                        value = item.get("Value", "")
+                        if name and value:
+                            # Amazon sometimes wraps values in quotes — strip them
+                            if value.startswith('"') and value.endswith('"'):
+                                value = value[1:-1]
+                            new_cookies[name] = value
+                    _LOGGER.debug(
+                        "Token exchange: %d cookies for %s: %s",
+                        len(cookie_list),
+                        domain,
+                        [c.get("Name") for c in cookie_list],
+                    )
+
                 if not new_cookies:
-                    _LOGGER.warning("Token exchange: no cookies received")
+                    _LOGGER.warning(
+                        "Token exchange: all cookies empty after parsing"
+                    )
                     return False
 
                 if not self._session or self._session.is_closed:
@@ -502,17 +557,16 @@ async def async_register_device(
 ) -> str | None:
     """Register this client as an Amazon device and return the refresh token.
 
-    Called once after the initial proxy login.  Authenticates via the captured
-    session cookies (website_cookies) — no OAuth access_token required.  The
-    long-lived refresh_token returned here is stored in the config entry and
-    used by async_try_token_exchange() for all future silent session renewals
-    (no metadata1 browser fingerprint needed).
+    Mirrors alexapy's get_tokens() exactly:
+    - frc: 313 random bytes, base64-encoded without padding (required)
+    - website_cookies: empty list — session cookies sent as HTTP cookies
+    - auth_data: empty when no access_token (Amazon authenticates via cookies)
+    - Tries user domain first, falls back to amazon.com
 
-    Returns the refresh_token string on success, None on failure (non-fatal:
-    the integration will fall back to programmatic login).
+    Returns the refresh_token string on success, None on failure (non-fatal).
     """
-    url = AMAZON_REGISTER_DEVICE_URL_TEMPLATE.format(domain=amazon_domain)
-    website_cookies = [{"Name": k, "Value": v} for k, v in cookies.items()]
+    # Required fingerprint value — must be real random bytes, not empty string
+    frc = base64.b64encode(secrets.token_bytes(313)).decode("ascii").rstrip("=")
 
     auth_data: dict[str, Any] = {}
     if access_token:
@@ -521,63 +575,77 @@ async def async_register_device(
     payload = {
         "requested_extensions": ["device_info", "customer_info"],
         "cookies": {
-            "website_cookies": website_cookies,
+            "website_cookies": [],  # empty — auth via HTTP session cookies
             "domain": f".{amazon_domain}",
         },
         "registration_data": {
             "domain": "Device",
             "app_version": AMAZON_APP_VERSION,
             "device_type": AMAZON_DEVICE_TYPE,
-            "device_name": AMAZON_APP_NAME,
+            # Amazon replaces %FIRST_NAME% and %DUPE_STRATEGY_1ST% server-side
+            "device_name": f"%FIRST_NAME%\u0027s%DUPE_STRATEGY_1ST%{AMAZON_APP_NAME}",
+            "os_version": AMAZON_OS_VERSION,
             "device_serial": device_serial,
             "device_model": AMAZON_DEVICE_MODEL,
-            "os_version": AMAZON_OS_VERSION,
+            "app_name": AMAZON_APP_NAME,
             "software_version": AMAZON_SOFTWARE_VERSION,
         },
         "auth_data": auth_data,
-        "user_context_map": {
-            "frc": "",
-        },
+        "user_context_map": {"frc": frc},
         "requested_token_type": ["bearer", "mac_dms", "website_cookies"],
     }
 
-    try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
-            headers={
-                "User-Agent": AMAZON_USER_AGENT,
-                "Content-Type": "application/json",
-                "x-amzn-identity-auth-domain": f"api.{amazon_domain}",
-            },
-        ) as client:
-            resp = await client.post(url, json=payload)
-            _LOGGER.debug("Device registration: status=%d", resp.status_code)
+    # Try user's domain first, then amazon.com (same fallback as alexapy)
+    domains_to_try = [amazon_domain]
+    if amazon_domain.lower() != "amazon.com":
+        domains_to_try.append("amazon.com")
 
-            if resp.status_code not in (200, 201):
-                _LOGGER.warning(
-                    "Device registration failed: status=%d body=%s",
-                    resp.status_code,
-                    resp.text[:300],
+    for domain in domains_to_try:
+        payload["cookies"]["domain"] = f".{domain}"
+        _LOGGER.debug("Attempting device registration with api.%s", domain)
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": AMAZON_USER_AGENT_DEVICE,
+                    "x-amzn-identity-auth-domain": f"api.{domain}",
+                },
+                cookies=cookies,  # session cookies sent as HTTP cookies (not in JSON)
+            ) as client:
+                resp = await client.post(
+                    f"https://api.{domain}/auth/register", json=payload
                 )
-                return None
+                _LOGGER.debug(
+                    "Device registration (%s): status=%d", domain, resp.status_code
+                )
 
-            data = resp.json()
-            refresh_token = (
-                data.get("response", {})
-                .get("success", {})
-                .get("tokens", {})
-                .get("bearer", {})
-                .get("refresh_token")
-            )
-            if refresh_token:
-                _LOGGER.debug("Device registration succeeded, refresh_token captured")
-                return refresh_token
+                if resp.status_code == 200:
+                    data = resp.json()
+                    refresh_token = (
+                        data.get("response", {})
+                        .get("success", {})
+                        .get("tokens", {})
+                        .get("bearer", {})
+                        .get("refresh_token")
+                    )
+                    if refresh_token:
+                        _LOGGER.debug(
+                            "Device registration succeeded with %s", domain
+                        )
+                        return refresh_token
+                    _LOGGER.warning(
+                        "Device registration (%s): unexpected response: %s",
+                        domain,
+                        str(data)[:300],
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Device registration failed: status=%d body=%s",
+                        resp.status_code,
+                        resp.text[:300],
+                    )
+        except Exception as err:
+            _LOGGER.warning("Device registration (%s) exception: %s", domain, err)
 
-            _LOGGER.warning(
-                "Device registration: unexpected response format: %s",
-                str(data)[:300],
-            )
-            return None
-    except Exception as err:
-        _LOGGER.warning("Device registration failed: %s", err)
-        return None
+    return None
