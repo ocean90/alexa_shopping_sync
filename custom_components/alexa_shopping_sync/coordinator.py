@@ -288,102 +288,105 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 self._trigger_reauth()
                 raise UpdateFailed("Not authenticated - reauth required")
 
-            try:
-                alexa_items = await self._amazon_client.async_get_snapshot()
-                self._alexa_item_count = len(alexa_items)
+            # Allow one silent re-auth retry within the same update cycle.
+            # Without this, a successful silent refresh would still raise
+            # UpdateFailed, causing an infinite retry loop.
+            for _attempt in range(2):
+                try:
+                    alexa_items = await self._amazon_client.async_get_snapshot()
+                    self._alexa_item_count = len(alexa_items)
 
-                result = await self._sync_engine.async_sync_alexa_to_ha(alexa_items)
+                    result = await self._sync_engine.async_sync_alexa_to_ha(alexa_items)
 
-                if self._ha_bridge:
-                    try:
-                        ha_items = await self._ha_bridge.async_get_items()
-                        self._ha_item_count = len(ha_items)
-                    except Exception:
-                        pass
+                    if self._ha_bridge:
+                        try:
+                            ha_items = await self._ha_bridge.async_get_items()
+                            self._ha_item_count = len(ha_items)
+                        except Exception:
+                            pass
 
-                self._sync_engine.state.last_alexa_snapshot_hash = (
-                    self._amazon_client.compute_snapshot_hash(alexa_items)
-                )
-                if self._amazon_client.shopping_list_id:
-                    self._sync_engine.state.shopping_list_id = (
-                        self._amazon_client.shopping_list_id
+                    self._sync_engine.state.last_alexa_snapshot_hash = (
+                        self._amazon_client.compute_snapshot_hash(alexa_items)
+                    )
+                    if self._amazon_client.shopping_list_id:
+                        self._sync_engine.state.shopping_list_id = (
+                            self._amazon_client.shopping_list_id
+                        )
+
+                    await self._sync_engine.async_save_state()
+
+                    self._connected = True
+                    self._consecutive_errors = 0
+                    self._last_success = str(time.time())
+                    self._last_error = ""
+
+                    if result.errors:
+                        _LOGGER.warning(
+                            "Alexa->HA sync had %d errors: %s",
+                            len(result.errors),
+                            result.errors[:3],
+                        )
+                        self._last_error = "; ".join(result.errors[:3])
+
+                    _LOGGER.debug(
+                        "Poll complete: Alexa->HA +%d ~%d -%d (echo=%d, items=%d)",
+                        result.alexa_to_ha_adds,
+                        result.alexa_to_ha_updates,
+                        result.alexa_to_ha_deletes,
+                        result.skipped_echo,
+                        self._alexa_item_count,
                     )
 
-                await self._sync_engine.async_save_state()
+                    return {
+                        "alexa_items": self._alexa_item_count,
+                        "ha_items": self._ha_item_count,
+                        "last_sync": self._last_success,
+                        "connected": True,
+                    }
 
-                self._connected = True
-                self._consecutive_errors = 0
-                self._last_success = str(time.time())
-                self._last_error = ""
+                except SessionExpiredError:
+                    self._connected = False
+                    if _attempt == 0 and await self._async_try_silent_refresh():
+                        _LOGGER.info("Silent re-auth succeeded, retrying update immediately")
+                        continue  # retry the fetch with fresh cookies
+                    self._last_error = "Session expired — re-authentication required"
+                    self._trigger_reauth()
+                    raise UpdateFailed("Session expired - reauth required")
 
-                if result.errors:
-                    _LOGGER.warning(
-                        "Alexa->HA sync had %d errors: %s",
-                        len(result.errors),
-                        result.errors[:3],
-                    )
-                    self._last_error = "; ".join(result.errors[:3])
+                except ThrottledError as err:
+                    self._consecutive_errors += 1
+                    self._last_error = str(err)
+                    if self._consecutive_errors >= 3:
+                        ir.async_create_issue(
+                            self.hass,
+                            DOMAIN,
+                            "rate_limited",
+                            is_fixable=False,
+                            severity=ir.IssueSeverity.WARNING,
+                            translation_key="rate_limited",
+                        )
+                    raise UpdateFailed(f"Rate limited: {err}")
 
-                _LOGGER.debug(
-                    "Poll complete: Alexa->HA +%d ~%d -%d (echo=%d, items=%d)",
-                    result.alexa_to_ha_adds,
-                    result.alexa_to_ha_updates,
-                    result.alexa_to_ha_deletes,
-                    result.skipped_echo,
-                    self._alexa_item_count,
-                )
+                except Exception as err:
+                    self._connected = False
+                    self._consecutive_errors += 1
+                    self._last_error = str(err)
 
-                return {
-                    "alexa_items": self._alexa_item_count,
-                    "ha_items": self._ha_item_count,
-                    "last_sync": self._last_success,
-                    "connected": True,
-                }
+                    if self._consecutive_errors >= 5:
+                        _LOGGER.error(
+                            "Too many consecutive errors (%d), may need reauth",
+                            self._consecutive_errors,
+                        )
+                        ir.async_create_issue(
+                            self.hass,
+                            DOMAIN,
+                            "repeated_auth_failure",
+                            is_fixable=False,
+                            severity=ir.IssueSeverity.ERROR,
+                            translation_key="repeated_auth_failure",
+                        )
 
-            except SessionExpiredError:
-                self._connected = False
-                if await self._async_try_silent_refresh():
-                    _LOGGER.info("Silent re-auth succeeded; next poll will use fresh session")
-                    self._last_error = "Session refreshed silently — retrying"
-                    raise UpdateFailed("Session refreshed silently")
-                self._last_error = "Session expired — re-authentication required"
-                self._trigger_reauth()
-                raise UpdateFailed("Session expired - reauth required")
-
-            except ThrottledError as err:
-                self._consecutive_errors += 1
-                self._last_error = str(err)
-                if self._consecutive_errors >= 3:
-                    ir.async_create_issue(
-                        self.hass,
-                        DOMAIN,
-                        "rate_limited",
-                        is_fixable=False,
-                        severity=ir.IssueSeverity.WARNING,
-                        translation_key="rate_limited",
-                    )
-                raise UpdateFailed(f"Rate limited: {err}")
-
-            except Exception as err:
-                self._connected = False
-                self._consecutive_errors += 1
-                self._last_error = str(err)
-
-                if self._consecutive_errors >= 5:
-                    _LOGGER.error(
-                        "Too many consecutive errors (%d), may need reauth",
-                        self._consecutive_errors,
-                    )
-                    ir.async_create_issue(
-                        self.hass,
-                        DOMAIN,
-                        "repeated_auth_failure",
-                        is_fixable=False,
-                        severity=ir.IssueSeverity.ERROR,
-                        translation_key="repeated_auth_failure",
-                    )
-
-                raise UpdateFailed(f"Update failed: {err}")
+                    raise UpdateFailed(f"Update failed: {err}")
 
     async def _async_try_silent_refresh(self) -> bool:
         """Try silent session refresh using stored credentials.
