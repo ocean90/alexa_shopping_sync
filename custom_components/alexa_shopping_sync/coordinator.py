@@ -295,9 +295,10 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "Session not authenticated, attempting silent re-auth before reauth flow"
                     )
                     if await self._async_try_silent_refresh():
-                        _LOGGER.info("Silent re-auth succeeded, continuing update")
+                        _LOGGER.warning("Silent re-auth succeeded, continuing update")
                         # fall through to the fetch loop below
                     else:
+                        _LOGGER.warning("Silent re-auth failed, triggering manual reauth")
                         self._last_error = "Session expired — re-authentication required"
                         self._trigger_reauth()
                         raise UpdateFailed("Not authenticated - reauth required")

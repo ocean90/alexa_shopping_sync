@@ -254,7 +254,7 @@ class AuthManager:
         On success the new cookies are injected into the main session so
         subsequent API calls succeed immediately (next poll or mutation).
         """
-        _LOGGER.info("Attempting silent re-authentication with stored credentials")
+        _LOGGER.warning("Attempting silent re-authentication with stored credentials")
 
         signin_url = (
             f"https://www.{self._amazon_domain}/ap/signin"
@@ -350,13 +350,30 @@ class AuthManager:
 
                 # mark_authenticated clears old cookies before adding new ones
                 self.mark_authenticated(new_cookies)
-                _LOGGER.info(
-                    "Silent re-authentication succeeded (%d cookies)", len(new_cookies)
+
+                # Step 6: Verify the new cookies actually work against the API.
+                # The login page may redirect cleanly even with incomplete cookies
+                # (e.g. missing metadata1 field), so we must confirm API access.
+                _LOGGER.debug("Silent relogin step 6: validating new cookies against API")
+                if not await self.async_validate_session():
+                    self._authenticated = False
+                    _LOGGER.warning(
+                        "Silent relogin failed: login appeared successful but API "
+                        "returned non-200 — cookies are likely incomplete (missing "
+                        "metadata1 or similar browser-generated field)"
+                    )
+                    return False
+
+                _LOGGER.warning(
+                    "Silent re-authentication succeeded and API validated (%d cookies)",
+                    len(new_cookies),
                 )
                 return True
 
         except Exception as err:
-            _LOGGER.warning("Silent re-authentication failed with exception: %s", err, exc_info=True)
+            _LOGGER.warning(
+                "Silent re-authentication failed with exception: %s", err, exc_info=True
+            )
             return False
 
     async def _async_submit_form(
