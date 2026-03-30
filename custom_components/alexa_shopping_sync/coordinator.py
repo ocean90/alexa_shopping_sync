@@ -179,6 +179,13 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Create session (auth will happen via proxy in config flow)
         await self._auth_manager.async_create_session()
 
+        # Restore device credentials for silent token exchange
+        refresh_token = data.get("_refresh_token", "")
+        device_serial = data.get("_device_serial", "")
+        if refresh_token and device_serial:
+            self._auth_manager.set_device_credentials(refresh_token, device_serial)
+            _LOGGER.debug("Restored device credentials for silent session renewal")
+
         # Restore session cookies captured during config flow proxy login
         saved_cookies: dict[str, str] = data.get("_cookies", {})
         if saved_cookies:
@@ -408,23 +415,48 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     raise UpdateFailed(f"Update failed: {err}")
 
     async def _async_try_silent_refresh(self) -> bool:
-        """Try silent session refresh using stored credentials.
+        """Try silent session refresh.
 
-        If successful the new cookies are persisted to the config entry so
-        they survive an HA restart.  Returns True when re-auth succeeded.
-        Always returns False on any exception — must never raise, because it
-        is called from inside an except-handler and an unhandled exception
-        there would bypass the remaining except-clauses.
+        Primary path: token exchange via refresh_token obtained during device
+        registration.  This works reliably from server-side code (no metadata1
+        browser fingerprint needed).
+
+        Fallback path: headless form-fill login — may fail if metadata1 is
+        absent, but kept as a last resort for installations that pre-date device
+        registration.
+
+        Persists new cookies to the config entry on success so they survive HA
+        restarts.  Always returns False on any exception — must never raise,
+        because it is called from inside an except-handler.
         """
         if not self._auth_manager:
             return False
 
         try:
+            # Primary: token exchange (no metadata1 required)
+            if self._auth_manager.has_refresh_token:
+                _LOGGER.debug("Attempting silent refresh via token exchange")
+                if await self._auth_manager.async_try_token_exchange():
+                    new_cookies = self._auth_manager.extract_cookies_dict()
+                    if new_cookies:
+                        self.hass.config_entries.async_update_entry(
+                            self._entry,
+                            data={**self._entry.data, "_cookies": new_cookies},
+                        )
+                        _LOGGER.debug(
+                            "Persisted %d new cookies after token exchange",
+                            len(new_cookies),
+                        )
+                    return True
+                _LOGGER.warning(
+                    "Token exchange failed, falling back to programmatic login"
+                )
+
+            # Fallback: programmatic form-fill login
             success = await self._auth_manager.async_try_silent_relogin()
             if not success:
                 return False
 
-            # Persist new cookies so they survive HA restarts
             new_cookies = self._auth_manager.extract_cookies_dict()
             if new_cookies:
                 self.hass.config_entries.async_update_entry(
@@ -432,7 +464,8 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     data={**self._entry.data, "_cookies": new_cookies},
                 )
                 _LOGGER.debug(
-                    "Persisted %d new cookies after silent re-auth", len(new_cookies)
+                    "Persisted %d new cookies after programmatic re-auth",
+                    len(new_cookies),
                 )
 
             return True

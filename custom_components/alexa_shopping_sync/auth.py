@@ -14,7 +14,15 @@ from bs4 import BeautifulSoup
 from homeassistant.core import HomeAssistant
 
 from .const import (
+    AMAZON_APP_NAME,
+    AMAZON_APP_VERSION,
     AMAZON_BASE_URL_TEMPLATE,
+    AMAZON_DEVICE_MODEL,
+    AMAZON_DEVICE_TYPE,
+    AMAZON_EXCHANGE_TOKEN_URL_TEMPLATE,
+    AMAZON_OS_VERSION,
+    AMAZON_REGISTER_DEVICE_URL_TEMPLATE,
+    AMAZON_SOFTWARE_VERSION,
     AMAZON_USER_AGENT,
     CAPTCHA_INDICATORS,
     HTTP_TIMEOUT,
@@ -134,6 +142,8 @@ class AuthManager:
         self._base_url = AMAZON_BASE_URL_TEMPLATE.format(domain=amazon_domain)
         self._login_attempt_count = 0
         self._max_login_attempts = 5
+        self._refresh_token: str | None = None
+        self._device_serial: str | None = None
 
     @property
     def authenticated(self) -> bool:
@@ -242,6 +252,81 @@ class AuthManager:
         if not self._session or not self._authenticated:
             raise SessionExpiredError("No authenticated session available")
         return self._session
+
+    def set_device_credentials(self, refresh_token: str, device_serial: str) -> None:
+        """Store device credentials obtained during initial proxy login."""
+        self._refresh_token = refresh_token
+        self._device_serial = device_serial
+
+    @property
+    def has_refresh_token(self) -> bool:
+        """Return whether we have a refresh token for silent session renewal."""
+        return bool(self._refresh_token)
+
+    async def async_try_token_exchange(self) -> bool:
+        """Exchange the stored refresh token for fresh session cookies.
+
+        Uses Amazon's /ap/exchangetoken/cookies endpoint.  Unlike headless
+        form-fill login this call does NOT require the metadata1 browser
+        fingerprint, so it works reliably from server-side code.
+
+        Returns True on success (session marked authenticated), False otherwise.
+        """
+        if not self._refresh_token:
+            return False
+
+        url = AMAZON_EXCHANGE_TOKEN_URL_TEMPLATE.format(domain=self._amazon_domain)
+        _LOGGER.warning("Attempting silent session renewal via token exchange")
+
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
+                follow_redirects=True,
+                headers={"User-Agent": AMAZON_USER_AGENT},
+            ) as client:
+                resp = await client.post(
+                    url,
+                    data={
+                        "domain": f".{self._amazon_domain}",
+                        "auth_tokens[]": self._refresh_token,
+                    },
+                )
+                _LOGGER.debug(
+                    "Token exchange: status=%d url=%s",
+                    resp.status_code,
+                    resp.url,
+                )
+
+                if resp.status_code not in (200, 302):
+                    _LOGGER.warning(
+                        "Token exchange failed: status=%d", resp.status_code
+                    )
+                    return False
+
+                new_cookies = {k: v for k, v in client.cookies.items()}
+                if not new_cookies:
+                    _LOGGER.warning("Token exchange: no cookies received")
+                    return False
+
+                if not self._session or self._session.is_closed:
+                    await self.async_create_session()
+
+                self.mark_authenticated(new_cookies)
+
+                if not await self.async_validate_session():
+                    self._authenticated = False
+                    _LOGGER.warning(
+                        "Token exchange: cookies received but API validation failed"
+                    )
+                    return False
+
+                _LOGGER.warning(
+                    "Token exchange succeeded (%d cookies)", len(new_cookies)
+                )
+                return True
+        except Exception as err:
+            _LOGGER.warning("Token exchange failed: %s", err, exc_info=True)
+            return False
 
     async def async_try_silent_relogin(self) -> bool:
         """Silently re-authenticate using stored credentials + TOTP.
@@ -407,3 +492,89 @@ class AuthManager:
 
         fields.update(overrides)
         return await client.post(action, data=fields)
+
+
+async def async_register_device(
+    amazon_domain: str,
+    access_token: str,
+    device_serial: str,
+    cookies: dict[str, str],
+) -> str | None:
+    """Register this client as an Amazon device and return the refresh token.
+
+    Called once after the initial proxy login captures an OAuth access_token
+    from the /ap/maplanding redirect.  The long-lived refresh_token returned
+    here is stored in the config entry and used by async_try_token_exchange()
+    for all future silent session renewals — no metadata1 required.
+
+    Returns the refresh_token string on success, None on failure (non-fatal:
+    the integration will fall back to programmatic login).
+    """
+    url = AMAZON_REGISTER_DEVICE_URL_TEMPLATE.format(domain=amazon_domain)
+    website_cookies = [{"Name": k, "Value": v} for k, v in cookies.items()]
+
+    payload = {
+        "requested_extensions": ["device_info", "customer_info"],
+        "cookies": {
+            "website_cookies": website_cookies,
+            "domain": f".{amazon_domain}",
+        },
+        "registration_data": {
+            "domain": "Device",
+            "app_version": AMAZON_APP_VERSION,
+            "device_type": AMAZON_DEVICE_TYPE,
+            "device_name": AMAZON_APP_NAME,
+            "device_serial": device_serial,
+            "device_model": AMAZON_DEVICE_MODEL,
+            "os_version": AMAZON_OS_VERSION,
+            "software_version": AMAZON_SOFTWARE_VERSION,
+        },
+        "auth_data": {
+            "access_token": access_token,
+        },
+        "user_context_map": {
+            "frc": "",
+        },
+        "requested_token_type": ["bearer", "mac_dms", "website_cookies"],
+    }
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
+            headers={
+                "User-Agent": AMAZON_USER_AGENT,
+                "Content-Type": "application/json",
+                "x-amzn-identity-auth-domain": f"api.{amazon_domain}",
+            },
+        ) as client:
+            resp = await client.post(url, json=payload)
+            _LOGGER.debug("Device registration: status=%d", resp.status_code)
+
+            if resp.status_code not in (200, 201):
+                _LOGGER.warning(
+                    "Device registration failed: status=%d body=%s",
+                    resp.status_code,
+                    resp.text[:300],
+                )
+                return None
+
+            data = resp.json()
+            refresh_token = (
+                data.get("response", {})
+                .get("success", {})
+                .get("tokens", {})
+                .get("bearer", {})
+                .get("refresh_token")
+            )
+            if refresh_token:
+                _LOGGER.debug("Device registration succeeded, refresh_token captured")
+                return refresh_token
+
+            _LOGGER.warning(
+                "Device registration: unexpected response format: %s",
+                str(data)[:300],
+            )
+            return None
+    except Exception as err:
+        _LOGGER.warning("Device registration failed: %s", err)
+        return None

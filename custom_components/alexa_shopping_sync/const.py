@@ -63,6 +63,18 @@ ECHO_SUPPRESSION_WINDOW: Final = 10
 PROXY_PORT_RANGE_START: Final = 8700
 PROXY_PORT_RANGE_END: Final = 8799
 
+# OAuth Device Registration (for silent session renewal)
+# Using /auth/register to obtain a long-lived refresh_token avoids the
+# metadata1 browser-fingerprint requirement that breaks headless logins.
+AMAZON_REGISTER_DEVICE_URL_TEMPLATE: Final = "https://api.{domain}/auth/register"
+AMAZON_EXCHANGE_TOKEN_URL_TEMPLATE: Final = "https://www.{domain}/ap/exchangetoken/cookies"
+AMAZON_DEVICE_TYPE: Final = "A2IVLV5VM2W81"
+AMAZON_APP_NAME: Final = "HA Alexa Shopping Sync"
+AMAZON_APP_VERSION: Final = "2.2.345247.0"
+AMAZON_DEVICE_MODEL: Final = "Echo"
+AMAZON_OS_VERSION: Final = "10.11.1"
+AMAZON_SOFTWARE_VERSION: Final = "130050020"
+
 # Passkey / unsupported flow detection patterns
 PASSKEY_INDICATORS: Final = (
     "passkey",

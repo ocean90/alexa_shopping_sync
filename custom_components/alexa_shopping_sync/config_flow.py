@@ -7,8 +7,10 @@ completes Amazon login there, proxy detects success and calls back to HA.
 
 from __future__ import annotations
 
+import binascii
 import datetime
 import logging
+import os
 from functools import partial
 from typing import Any, Optional, Union
 from urllib.parse import urlparse
@@ -33,6 +35,7 @@ from homeassistant.exceptions import Unauthorized
 from yarl import URL
 
 from .auth import (
+    async_register_device,
     check_page_for_captcha,
     check_page_for_unsupported_flow,
     generate_otp,
@@ -112,6 +115,9 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         self._user_input: dict[str, Any] = {}
         self._login_error: str | None = None
         self._captured_cookies: dict[str, str] = {}
+        # OAuth device registration — generated once per flow instance
+        self._device_serial: str = binascii.b2a_hex(os.urandom(16)).decode("utf-8")
+        self._captured_access_token: str = ""
 
     @staticmethod
     @callback
@@ -202,16 +208,23 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             except Exception:
                 ha_url = "http://homeassistant.local:8123"
 
-        # Amazon login URL
+        # Amazon login URL — OAuth device params cause Amazon to include
+        # access_token in the /ap/maplanding redirect, enabling device
+        # registration and long-lived refresh_token for silent renewal.
         login_url = (
             f"https://www.{amazon_domain}/ap/signin"
             f"?openid.pape.max_auth_age=0"
-            f"&openid.return_to=https%3A%2F%2Fwww.{amazon_domain}%2F"
-            f"&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
-            f"&openid.assoc_handle=deflex"
+            f"&openid.return_to=https%3A%2F%2Fwww.{amazon_domain}%2Fap%2Fmaplanding"
+            f"&openid.assoc_handle=amzn_dp_project_dee_ios"
             f"&openid.mode=checkid_setup"
+            f"&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0"
+            f"&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
             f"&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
-            f"&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&"
+            f"&openid.ns.oa2=http%3A%2F%2Fwww.amazon.com%2Fap%2Fext%2Foauth%2F2"
+            f"&openid.oa2.location=us"
+            f"&openid.oa2.scope=device_auth_access"
+            f"&openid.oa2.response_type=token"
+            f"&openid.oa2.client_id=device%3A{self._device_serial}"
         )
 
         proxy_base_url = str(URL(ha_url).with_path(AUTH_PROXY_PATH))
@@ -293,12 +306,22 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         resp_url = URL(str(resp.url))
         resp_path = resp_url.path
 
-        # Successful login lands on /ap/maplanding or /spa/index.html
-        # or the main amazon page after successful auth
+        # Successful login lands on /ap/maplanding (with OAuth) or /spa/index.html
         if resp_path in ["/ap/maplanding", "/spa/index.html"]:
             _LOGGER.info("Amazon login successful (path: %s)", resp_path)
             config_flow_id = self._proxy.init_query.get("config_flow_id")
             callback_url = self._proxy.init_query.get("callback_url")
+
+            # Extract OAuth access_token for device registration
+            access_token = resp_url.query.get("openid.oa2.access_token")
+            if access_token:
+                self._captured_access_token = access_token
+                _LOGGER.debug("Captured OAuth access_token for device registration")
+            else:
+                _LOGGER.debug(
+                    "No OAuth access_token in maplanding URL — "
+                    "device registration will be skipped"
+                )
 
             self._login_error = None  # clear any earlier false-positive
             self._captured_cookies = self._extract_proxy_cookies(resp)
@@ -402,22 +425,55 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.error("No session cookies captured after proxy login")
             return self.async_abort(reason="login_failed")
 
+        # Attempt OAuth device registration to obtain a long-lived refresh_token.
+        # If successful, silent session renewal will use token exchange instead
+        # of the headless form-fill login that fails due to missing metadata1.
+        refresh_token: str | None = None
+        if self._captured_access_token and self._device_serial:
+            amazon_domain = self._user_input.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN)
+            refresh_token = await async_register_device(
+                amazon_domain=amazon_domain,
+                access_token=self._captured_access_token,
+                device_serial=self._device_serial,
+                cookies=cookies,
+            )
+            if refresh_token:
+                _LOGGER.info(
+                    "Device registration succeeded — silent token refresh enabled"
+                )
+            else:
+                _LOGGER.warning(
+                    "Device registration failed — silent refresh unavailable "
+                    "(session will require manual re-authentication when it expires)"
+                )
+        else:
+            _LOGGER.debug(
+                "No OAuth access_token captured — skipping device registration"
+            )
+
         self._user_input["_cookies"] = cookies
+        if refresh_token:
+            self._user_input["_refresh_token"] = refresh_token
+            self._user_input["_device_serial"] = self._device_serial
 
         # Reauth: update existing entry instead of creating a new one
         if self.source == SOURCE_REAUTH:
             reauth_entry = self._get_reauth_entry()
+            data_updates: dict[str, Any] = {
+                CONF_PASSWORD: self._user_input.get(
+                    CONF_PASSWORD, reauth_entry.data[CONF_PASSWORD]
+                ),
+                CONF_OTP_SECRET: self._user_input.get(
+                    CONF_OTP_SECRET, reauth_entry.data[CONF_OTP_SECRET]
+                ),
+                "_cookies": cookies,
+            }
+            if refresh_token:
+                data_updates["_refresh_token"] = refresh_token
+                data_updates["_device_serial"] = self._device_serial
             return self.async_update_reload_and_abort(
                 reauth_entry,
-                data_updates={
-                    CONF_PASSWORD: self._user_input.get(
-                        CONF_PASSWORD, reauth_entry.data[CONF_PASSWORD]
-                    ),
-                    CONF_OTP_SECRET: self._user_input.get(
-                        CONF_OTP_SECRET, reauth_entry.data[CONF_OTP_SECRET]
-                    ),
-                    "_cookies": cookies,
-                },
+                data_updates=data_updates,
             )
 
         return await self.async_step_sync_options()
@@ -441,6 +497,8 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_HA_URL: full_config.get(CONF_HA_URL, ""),
                     CONF_PUBLIC_URL: full_config.get(CONF_PUBLIC_URL, ""),
                     "_cookies": full_config.get("_cookies", {}),
+                    "_refresh_token": full_config.get("_refresh_token", ""),
+                    "_device_serial": full_config.get("_device_serial", ""),
                 },
                 options={
                     CONF_SYNC_MODE: full_config.get(
