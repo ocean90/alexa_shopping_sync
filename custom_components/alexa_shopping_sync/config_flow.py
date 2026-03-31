@@ -233,9 +233,12 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             ".it": "it_IT", ".co.jp": "ja_JP", ".com.br": "pt_BR",
         }
         language = _locale_map.get(amazon_tld, "en_US")
+        # Always use amazon.com — /ap/register only exists on .com (not .de etc.)
+        # Amazon's unified auth handles all regional accounts. language= param
+        # ensures the login page is shown in the user's language.
         login_url = (
-            f"https://www.{amazon_domain}/ap/register"
-            f"?openid.return_to=https%3A%2F%2Fwww.{amazon_domain}%2Fap%2Fmaplanding"
+            f"https://www.amazon.com/ap/register"
+            f"?openid.return_to=https%3A%2F%2Fwww.amazon.com%2Fap%2Fmaplanding"
             f"&openid.assoc_handle=amzn_dp_project_dee_ios"
             f"&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
             f"&pageId=amzn_dp_project_dee_ios"
