@@ -554,13 +554,15 @@ async def async_register_device(
     device_serial: str,
     cookies: dict[str, str],
     access_token: str | None = None,
+    authorization_code: str | None = None,
+    code_verifier: str | None = None,
 ) -> str | None:
     """Register this client as an Amazon device and return the refresh token.
 
     Mirrors alexapy's get_tokens() exactly:
     - frc: 313 random bytes, base64-encoded without padding (required)
     - website_cookies: empty list — session cookies sent as HTTP cookies
-    - auth_data: empty when no access_token (Amazon authenticates via cookies)
+    - auth_data priority: access_token > authorization_code+code_verifier > {}
     - Tries user domain first, falls back to amazon.com
 
     Returns the refresh_token string on success, None on failure (non-fatal).
@@ -571,6 +573,15 @@ async def async_register_device(
     auth_data: dict[str, Any] = {}
     if access_token:
         auth_data["access_token"] = access_token
+    elif authorization_code and code_verifier:
+        # PKCE authorization code flow (preferred — required by Amazon /auth/register)
+        auth_data = {
+            "client_id": device_serial,
+            "authorization_code": authorization_code,
+            "code_verifier": code_verifier,
+            "code_algorithm": "SHA-256",
+            "client_domain": "DeviceLegacy",
+        }
 
     payload = {
         "requested_extensions": ["device_info", "customer_info"],

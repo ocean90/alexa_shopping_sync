@@ -7,8 +7,10 @@ completes Amazon login there, proxy detects success and calls back to HA.
 
 from __future__ import annotations
 
+import base64
 import binascii
 import datetime
+import hashlib
 import logging
 import os
 from functools import partial
@@ -115,8 +117,21 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         self._user_input: dict[str, Any] = {}
         self._login_error: str | None = None
         self._captured_cookies: dict[str, str] = {}
-        # Device serial for OAuth device registration (generated once per flow instance)
+        # PKCE + device credentials for OAuth device registration
+        # Generated once per flow instance so proxy and registration always match.
         self._device_serial: str = binascii.b2a_hex(os.urandom(16)).decode("utf-8")
+        _cv_raw = os.urandom(32)
+        self._code_verifier: str = (
+            base64.urlsafe_b64encode(_cv_raw).rstrip(b"=").decode()
+        )
+        self._code_challenge: str = (
+            base64.urlsafe_b64encode(
+                hashlib.sha256(self._code_verifier.encode()).digest()
+            )
+            .rstrip(b"=")
+            .decode()
+        )
+        self._authorization_code: str = ""
 
     @staticmethod
     @callback
@@ -207,18 +222,36 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             except Exception:
                 ha_url = "http://homeassistant.local:8123"
 
-        # Standard Amazon login URL (OpenID 2.0, no OAuth device params).
-        # Device registration uses the captured session cookies directly —
-        # the /auth/register endpoint accepts website_cookies as auth.
+        # OAuth PKCE login URL — same approach as alexapy/alexa_media_player.
+        # /ap/register with response_type=code causes Amazon to include an
+        # authorization_code in the /ap/maplanding redirect, which is then
+        # exchanged for a long-lived refresh_token via device registration.
+        amazon_tld = "." + amazon_domain.split(".", 1)[-1]  # ".de" from "amazon.de"
+        _locale_map = {
+            ".de": "de_DE", ".com.au": "en_AU", ".ca": "en_CA", ".co.uk": "en_GB",
+            ".in": "en_IN", ".com": "en_US", ".es": "es_ES", ".fr": "fr_FR",
+            ".it": "it_IT", ".co.jp": "ja_JP", ".com.br": "pt_BR",
+        }
+        language = _locale_map.get(amazon_tld, "en_US")
         login_url = (
-            f"https://www.{amazon_domain}/ap/signin"
-            f"?openid.pape.max_auth_age=0"
-            f"&openid.return_to=https%3A%2F%2Fwww.{amazon_domain}%2F"
+            f"https://www.{amazon_domain}/ap/register"
+            f"?openid.return_to=https%3A%2F%2Fwww.{amazon_domain}%2Fap%2Fmaplanding"
+            f"&openid.assoc_handle=amzn_dp_project_dee_ios"
             f"&openid.identity=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
-            f"&openid.assoc_handle=deflex"
-            f"&openid.mode=checkid_setup"
+            f"&pageId=amzn_dp_project_dee_ios"
+            f"&accountStatusPolicy=P1"
             f"&openid.claimed_id=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0%2Fidentifier_select"
-            f"&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0&"
+            f"&openid.mode=checkid_setup"
+            f"&openid.ns.oa2=http%3A%2F%2Fwww.amazon.com%2Fap%2Fext%2Foauth%2F2"
+            f"&openid.oa2.client_id=device%3A{self._device_serial}"
+            f"&openid.ns.pape=http%3A%2F%2Fspecs.openid.net%2Fextensions%2Fpape%2F1.0"
+            f"&openid.oa2.response_type=code"
+            f"&openid.ns=http%3A%2F%2Fspecs.openid.net%2Fauth%2F2.0"
+            f"&openid.pape.max_auth_age=0"
+            f"&openid.oa2.scope=device_auth_access%20offline_access"
+            f"&openid.oa2.code_challenge_method=S256"
+            f"&openid.oa2.code_challenge={self._code_challenge}"
+            f"&language={language}"
         )
 
         proxy_base_url = str(URL(ha_url).with_path(AUTH_PROXY_PATH))
@@ -300,12 +333,24 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         resp_url = URL(str(resp.url))
         resp_path = resp_url.path
 
-        # Successful login lands on /ap/maplanding or /spa/index.html
-        # or the main amazon page after successful auth
+        # Successful login lands on /ap/maplanding (OAuth PKCE flow) or /spa/index.html
         if resp_path in ["/ap/maplanding", "/spa/index.html"]:
             _LOGGER.info("Amazon login successful (path: %s)", resp_path)
             config_flow_id = self._proxy.init_query.get("config_flow_id")
             callback_url = self._proxy.init_query.get("callback_url")
+
+            # Extract authorization_code for PKCE device registration
+            auth_code = resp_url.query.get("openid.oa2.authorization_code")
+            if auth_code:
+                self._authorization_code = auth_code
+                _LOGGER.debug(
+                    "Captured OAuth authorization_code for device registration"
+                )
+            else:
+                _LOGGER.debug(
+                    "No authorization_code in maplanding URL "
+                    "(device registration will use cookie auth)"
+                )
 
             self._login_error = None  # clear any earlier false-positive
             self._captured_cookies = self._extract_proxy_cookies(resp)
@@ -427,6 +472,8 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             amazon_domain=amazon_domain,
             device_serial=self._device_serial,
             cookies=cookies,
+            authorization_code=self._authorization_code or None,
+            code_verifier=self._code_verifier,
         )
         if refresh_token:
             _LOGGER.info(
