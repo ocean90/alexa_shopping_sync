@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
     SensorStateClass,
@@ -24,6 +25,7 @@ SENSOR_DESCRIPTIONS = [
         key="last_success",
         translation_key="last_success",
         icon="mdi:clock-check-outline",
+        device_class=SensorDeviceClass.TIMESTAMP,
     ),
     SensorEntityDescription(
         key="last_error",
@@ -109,7 +111,7 @@ class AlexaShoppingSensor(
         self.async_write_ha_state()
 
     @property
-    def native_value(self) -> str | int | None:
+    def native_value(self) -> str | int | datetime | None:
         """Return the state of the sensor."""
         key = self.entity_description.key
 
@@ -117,11 +119,10 @@ class AlexaShoppingSensor(
             ts = self.coordinator.last_success
             if ts:
                 try:
-                    dt = datetime.fromtimestamp(float(ts))
-                    return dt.isoformat(timespec="seconds")
+                    return datetime.fromtimestamp(float(ts), tz=timezone.utc)
                 except (ValueError, OSError):
-                    return ts
-            return "Never"
+                    return None
+            return None
 
         if key == "last_error":
             return self.coordinator.last_error or "None"
