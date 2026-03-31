@@ -49,6 +49,8 @@ async def async_setup_entry(
 
     entry.runtime_data = coordinator
 
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     # Register services
@@ -58,6 +60,13 @@ async def async_setup_entry(
     coordinator.async_start_event_listener()
 
     return True
+
+
+async def _async_options_updated(
+    hass: HomeAssistant, entry: AlexaShoppingConfigEntry
+) -> None:
+    """Handle options update — reload entry so new poll interval takes effect."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(
