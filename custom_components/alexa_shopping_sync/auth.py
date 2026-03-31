@@ -241,13 +241,18 @@ class AuthManager:
     def extract_cookies_dict(self) -> dict[str, str]:
         """Extract cookies from session as dict (no secrets logged).
 
-        Uses .items() rather than dict() to avoid httpx.CookieConflict when
-        multiple cookies share the same name across different domains.
+        Iterates the underlying http.cookiejar.CookieJar directly to avoid
+        httpx.CookieConflict — httpx's .items() calls __getitem__ per key,
+        which raises when multiple cookies share a name across domains
+        (e.g. session-id for .amazon.com AND .amazon.de after token exchange).
         Last value wins for each name, which is acceptable for persistence.
         """
         if not self._session:
             return {}
-        return {k: v for k, v in self._session.cookies.items()}
+        result: dict[str, str] = {}
+        for cookie in self._session.cookies.jar:
+            result[cookie.name] = cookie.value
+        return result
 
     async def async_get_authenticated_session(self) -> httpx.AsyncClient:
         """Return the authenticated httpx session or raise."""
