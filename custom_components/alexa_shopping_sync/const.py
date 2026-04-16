@@ -79,9 +79,7 @@ AMAZON_DEVICE_MODEL: Final = "iPhone"
 AMAZON_OS_VERSION: Final = "16.6"
 AMAZON_SOFTWARE_VERSION: Final = "1"
 # User-Agent for device registration / token exchange (AmazonWebView format)
-AMAZON_USER_AGENT_DEVICE: Final = (
-    f"AmazonWebView/Amazon Alexa/2.2.556530.0/iOS/16.6/iPhone"
-)
+AMAZON_USER_AGENT_DEVICE: Final = "AmazonWebView/Amazon Alexa/2.2.556530.0/iOS/16.6/iPhone"
 
 # Passkey / unsupported flow detection patterns
 PASSKEY_INDICATORS: Final = (

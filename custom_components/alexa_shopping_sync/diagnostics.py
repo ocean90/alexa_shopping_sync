@@ -7,7 +7,6 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
 from .coordinator import AlexaShoppingCoordinator
 
 # Keys that must be redacted from diagnostics
@@ -32,9 +31,7 @@ def _redact_dict(data: dict[str, Any]) -> dict[str, Any]:
         elif isinstance(value, dict):
             redacted[key] = _redact_dict(value)
         elif isinstance(value, list):
-            redacted[key] = [
-                _redact_dict(v) if isinstance(v, dict) else v for v in value
-            ]
+            redacted[key] = [_redact_dict(v) if isinstance(v, dict) else v for v in value]
         else:
             redacted[key] = value
     return redacted

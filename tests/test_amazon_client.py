@@ -24,9 +24,7 @@ SAMPLE_API_RESPONSE = {
     "YW16bjEuYWNjb3VudC5URVNULVNIT1BQSU5HX0lURU0=": {
         "listInfo": {
             "listId": "YW16bjEuYWNjb3VudC5URVNULVNIT1BQSU5HX0lURU0=",
-            "listOfListIds": [
-                "YW16bjEuYWNjb3VudC5URVNULVNIT1BQSU5HX0lURU0="
-            ],
+            "listOfListIds": ["YW16bjEuYWNjb3VudC5URVNULVNIT1BQSU5HX0lURU0="],
             "listName": "",
             "defaultList": True,
             "listType": "SHOPPING_LIST",
@@ -186,9 +184,7 @@ class TestSnapshotHash:
     def test_different_items_different_hash(self, client):
         items1 = [AlexaShoppingItem("a1", "Milk", False)]
         items2 = [AlexaShoppingItem("a1", "Bread", False)]
-        assert client.compute_snapshot_hash(items1) != client.compute_snapshot_hash(
-            items2
-        )
+        assert client.compute_snapshot_hash(items1) != client.compute_snapshot_hash(items2)
 
     def test_order_independent(self, client):
         items1 = [
@@ -199,6 +195,4 @@ class TestSnapshotHash:
             AlexaShoppingItem("a2", "Bread", True),
             AlexaShoppingItem("a1", "Milk", False),
         ]
-        assert client.compute_snapshot_hash(items1) == client.compute_snapshot_hash(
-            items2
-        )
+        assert client.compute_snapshot_hash(items1) == client.compute_snapshot_hash(items2)

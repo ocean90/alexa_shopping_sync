@@ -38,10 +38,8 @@ from .const import (
     AMAZON_API_GET_LIST_ITEMS,
     AMAZON_API_UPDATE_LIST_ITEM,
     AMAZON_SHOPPING_API_BASE,
-    AMAZON_USER_AGENT,
     HTTP_BACKOFF_FACTOR,
     HTTP_RETRY_COUNT,
-    HTTP_TIMEOUT,
 )
 from .exceptions import (
     AmazonListNotFoundError,
@@ -65,9 +63,7 @@ class AmazonShoppingClient:
         """Initialize the client."""
         self._auth = auth_manager
         self._shopping_list_id: str | None = None
-        self._api_base = AMAZON_SHOPPING_API_BASE.format(
-            domain=auth_manager.amazon_domain
-        )
+        self._api_base = AMAZON_SHOPPING_API_BASE.format(domain=auth_manager.amazon_domain)
         self._consecutive_auth_failures = 0
         # Cache of full item dicts from API (needed for update/delete payloads)
         self._item_cache: dict[str, dict[str, Any]] = {}
@@ -126,25 +122,19 @@ class AmazonShoppingClient:
                 if status in (401, 403):
                     self._consecutive_auth_failures += 1
                     self._auth.mark_session_expired()
-                    raise SessionExpiredError(
-                        f"Amazon returned {status} - session expired"
-                    )
+                    raise SessionExpiredError(f"Amazon returned {status} - session expired")
 
                 if status == 429:
                     if attempt < retry_count:
                         wait = HTTP_BACKOFF_FACTOR * (2**attempt)
-                        _LOGGER.warning(
-                            "Amazon rate limit (429), backing off %.1fs", wait
-                        )
+                        _LOGGER.warning("Amazon rate limit (429), backing off %.1fs", wait)
                         await asyncio.sleep(wait)
                         continue
                     raise ThrottledError("Amazon rate limit exceeded (429)")
 
                 if status >= 500 and attempt < retry_count:
                     wait = HTTP_BACKOFF_FACTOR * (2**attempt)
-                    _LOGGER.warning(
-                        "Amazon server error %d, retrying in %.1fs", status, wait
-                    )
+                    _LOGGER.warning("Amazon server error %d, retrying in %.1fs", status, wait)
                     await asyncio.sleep(wait)
                     continue
 
@@ -194,9 +184,7 @@ class AmazonShoppingClient:
             data = await self._async_request("GET", AMAZON_API_GET_LIST_ITEMS)
         except Exception as err:
             _LOGGER.error("Failed to discover shopping list: %s", err)
-            raise AmazonListNotFoundError(
-                "Could not retrieve Alexa shopping lists"
-            ) from err
+            raise AmazonListNotFoundError("Could not retrieve Alexa shopping lists") from err
 
         if not isinstance(data, dict):
             raise AmazonListNotFoundError("Unexpected response format from Amazon API")
@@ -223,9 +211,7 @@ class AmazonShoppingClient:
                 _LOGGER.debug("Found shopping list by default flag: %s", list_id)
                 return list_id
 
-        raise AmazonListNotFoundError(
-            f"No shopping list found among {len(data)} lists."
-        )
+        raise AmazonListNotFoundError(f"No shopping list found among {len(data)} lists.")
 
     async def async_get_snapshot(self) -> list[AlexaShoppingItem]:
         """Get current snapshot of Alexa shopping list items.
@@ -343,9 +329,7 @@ class AmazonShoppingClient:
             return AlexaShoppingItem.from_api_response(data)
         return None
 
-    async def async_mark_complete(
-        self, item_id: str, complete: bool
-    ) -> AlexaShoppingItem | None:
+    async def async_mark_complete(self, item_id: str, complete: bool) -> AlexaShoppingItem | None:
         """Toggle completion status of an Alexa item."""
         return await self.async_update_item(item_id, complete=complete)
 

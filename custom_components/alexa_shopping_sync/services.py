@@ -63,13 +63,9 @@ async def async_register_services(
     if not hass.services.has_service(DOMAIN, "full_resync"):
         hass.services.async_register(DOMAIN, "full_resync", handle_full_resync)
     if not hass.services.has_service(DOMAIN, "clear_local_mapping"):
-        hass.services.async_register(
-            DOMAIN, "clear_local_mapping", handle_clear_local_mapping
-        )
+        hass.services.async_register(DOMAIN, "clear_local_mapping", handle_clear_local_mapping)
     if not hass.services.has_service(DOMAIN, "mark_reauth_needed"):
-        hass.services.async_register(
-            DOMAIN, "mark_reauth_needed", handle_mark_reauth_needed
-        )
+        hass.services.async_register(DOMAIN, "mark_reauth_needed", handle_mark_reauth_needed)
     if not hass.services.has_service(DOMAIN, "export_sanitized_diagnostics"):
         hass.services.async_register(
             DOMAIN, "export_sanitized_diagnostics", handle_export_diagnostics

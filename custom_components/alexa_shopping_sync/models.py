@@ -198,9 +198,7 @@ class SyncState:
         """Deserialize from dict."""
         return cls(
             mappings=[ItemMapping.from_dict(m) for m in data.get("mappings", [])],
-            pending_ops=[
-                PendingOperation.from_dict(p) for p in data.get("pending_ops", [])
-            ],
+            pending_ops=[PendingOperation.from_dict(p) for p in data.get("pending_ops", [])],
             shopping_list_id=data.get("shopping_list_id", ""),
             last_alexa_snapshot_hash=data.get("last_alexa_snapshot_hash", ""),
             last_ha_snapshot_hash=data.get("last_ha_snapshot_hash", ""),

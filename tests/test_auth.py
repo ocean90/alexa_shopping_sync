@@ -65,17 +65,17 @@ class TestPasskeyDetection:
     """Tests for passkey / unsupported flow detection."""
 
     def test_passkey_detected(self):
-        html = '<div>Use your passkey to sign in</div>'
+        html = "<div>Use your passkey to sign in</div>"
         with pytest.raises(PasskeyDetectedError):
             check_page_for_unsupported_flow(html)
 
     def test_passkey_case_insensitive(self):
-        html = '<span>This device does not support PASSKEYS</span>'
+        html = "<span>This device does not support PASSKEYS</span>"
         with pytest.raises(PasskeyDetectedError):
             check_page_for_unsupported_flow(html)
 
     def test_fido_detected(self):
-        html = '<script>fido.authenticate()</script>'
+        html = "<script>fido.authenticate()</script>"
         with pytest.raises(PasskeyDetectedError):
             check_page_for_unsupported_flow(html)
 

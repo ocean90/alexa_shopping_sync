@@ -69,9 +69,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._amazon_client: AmazonShoppingClient | None = None
         self._ha_bridge: HAListBridge | None = None
         self._sync_engine: SyncEngine | None = None
-        self._target_list: str = entry.data.get(
-            CONF_TARGET_LIST, TARGET_SHOPPING_LIST
-        )
+        self._target_list: str = entry.data.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST)
         self._event_unsub: CALLBACK_TYPE | None = None
         self._mutation_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._mutation_task: asyncio.Task[None] | None = None
@@ -174,12 +172,8 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             ha_bridge=self._ha_bridge,
             sync_mode=sync_mode,
             initial_sync_mode=initial_sync_mode,
-            preserve_duplicates=options.get(
-                CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES
-            ),
-            mirror_completed=options.get(
-                CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED
-            ),
+            preserve_duplicates=options.get(CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES),
+            mirror_completed=options.get(CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED),
         )
 
         # Load persisted state
@@ -196,11 +190,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Remove the flag so we don't clear again on next reload
             self.hass.config_entries.async_update_entry(
                 self._entry,
-                data={
-                    k: v
-                    for k, v in data.items()
-                    if k != "_target_list_changed"
-                },
+                data={k: v for k, v in data.items() if k != "_target_list_changed"},
             )
 
         # Create session (auth will happen via proxy in config flow)
@@ -247,9 +237,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             self._event_unsub = async_track_state_change_event(
                 self.hass, [self._target_list], _on_list_changed
             )
-            _LOGGER.debug(
-                "Started listening for state_changed on %s", self._target_list
-            )
+            _LOGGER.debug("Started listening for state_changed on %s", self._target_list)
 
     @callback
     def async_stop_event_listener(self) -> None:
@@ -369,13 +357,10 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                 ha_hash = compute_snapshot_hash(ha_items)
                                 if (
                                     self._sync_engine.state.last_ha_snapshot_hash
-                                    and ha_hash
-                                    != self._sync_engine.state.last_ha_snapshot_hash
+                                    and ha_hash != self._sync_engine.state.last_ha_snapshot_hash
                                 ):
-                                    ha_result = (
-                                        await self._sync_engine.async_sync_ha_to_alexa(
-                                            ha_items
-                                        )
+                                    ha_result = await self._sync_engine.async_sync_ha_to_alexa(
+                                        ha_items
                                     )
                                     _LOGGER.debug(
                                         "Todo poll HA->Alexa: +%d ~%d -%d",
@@ -383,9 +368,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                                         ha_result.ha_to_alexa_updates,
                                         ha_result.ha_to_alexa_deletes,
                                     )
-                                self._sync_engine.state.last_ha_snapshot_hash = (
-                                    ha_hash
-                                )
+                                self._sync_engine.state.last_ha_snapshot_hash = ha_hash
                         except Exception:
                             pass
 
@@ -507,9 +490,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             len(new_cookies),
                         )
                     return True
-                _LOGGER.warning(
-                    "Token exchange failed, falling back to programmatic login"
-                )
+                _LOGGER.warning("Token exchange failed, falling back to programmatic login")
 
             # Fallback: programmatic form-fill login
             success = await self._auth_manager.async_try_silent_relogin()
@@ -588,9 +569,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 "email": "***REDACTED***",
                 "sync_mode": self._entry.options.get(CONF_SYNC_MODE),
                 "poll_interval": self._entry.options.get(CONF_POLL_INTERVAL),
-                "preserve_duplicates": self._entry.options.get(
-                    CONF_PRESERVE_DUPLICATES
-                ),
+                "preserve_duplicates": self._entry.options.get(CONF_PRESERVE_DUPLICATES),
                 "mirror_completed": self._entry.options.get(CONF_MIRROR_COMPLETED),
                 "debug_mode": self._entry.options.get(CONF_DEBUG_MODE),
             },

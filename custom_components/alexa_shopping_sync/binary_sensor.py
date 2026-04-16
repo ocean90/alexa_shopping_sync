@@ -5,7 +5,6 @@ from __future__ import annotations
 from homeassistant.components.binary_sensor import (
     BinarySensorDeviceClass,
     BinarySensorEntity,
-    BinarySensorEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -24,14 +23,14 @@ async def async_setup_entry(
     """Set up binary sensor entities."""
     coordinator: AlexaShoppingCoordinator = entry.runtime_data
 
-    async_add_entities([
-        AlexaShoppingConnectedSensor(coordinator, entry),
-    ])
+    async_add_entities(
+        [
+            AlexaShoppingConnectedSensor(coordinator, entry),
+        ]
+    )
 
 
-class AlexaShoppingConnectedSensor(
-    CoordinatorEntity[AlexaShoppingCoordinator], BinarySensorEntity
-):
+class AlexaShoppingConnectedSensor(CoordinatorEntity[AlexaShoppingCoordinator], BinarySensorEntity):
     """Binary sensor for connection status."""
 
     _attr_has_entity_name = True

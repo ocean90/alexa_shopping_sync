@@ -3,22 +3,17 @@
 from __future__ import annotations
 
 import time
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from custom_components.alexa_shopping_sync.const import (
     PENDING_OP_GRACE_SECONDS,
-    InitialSyncMode,
     PendingOpType,
     SyncMode,
 )
 from custom_components.alexa_shopping_sync.models import (
-    AlexaShoppingItem,
-    HAShoppingItem,
     ItemSource,
 )
-from custom_components.alexa_shopping_sync.sync_engine import SyncEngine
 
 from .conftest import make_alexa_item, make_ha_item
 
@@ -161,9 +156,7 @@ class TestAlexaToHaSync:
         sync_engine._initial_sync_done = True
         sync_engine._previous_alexa_items = []
 
-        result = await sync_engine.async_sync_alexa_to_ha(
-            [make_alexa_item("a1", "Milk")]
-        )
+        result = await sync_engine.async_sync_alexa_to_ha([make_alexa_item("a1", "Milk")])
 
         assert result.alexa_to_ha_adds == 0
 
@@ -179,9 +172,7 @@ class TestHaToAlexaSync:
 
         mock_amazon_client.async_add_item.return_value = make_alexa_item("a1", "Eggs")
 
-        result = await sync_engine.async_sync_ha_to_alexa(
-            [make_ha_item("h1", "Eggs")]
-        )
+        result = await sync_engine.async_sync_ha_to_alexa([make_ha_item("h1", "Eggs")])
 
         assert result.ha_to_alexa_adds == 1
 
@@ -205,9 +196,7 @@ class TestHaToAlexaSync:
         sync_engine._initial_sync_done = True
         sync_engine._previous_ha_items = []
 
-        result = await sync_engine.async_sync_ha_to_alexa(
-            [make_ha_item("h1", "Eggs")]
-        )
+        result = await sync_engine.async_sync_ha_to_alexa([make_ha_item("h1", "Eggs")])
 
         assert result.ha_to_alexa_adds == 0
 
@@ -222,41 +211,29 @@ class TestEchoSuppression:
         sync_engine._previous_alexa_items = []
 
         # Simulate a pending op (we just wrote "Eggs" to Alexa)
-        sync_engine.add_pending_op(
-            PendingOpType.ADD, ItemSource.HA, "Eggs", "a1"
-        )
+        sync_engine.add_pending_op(PendingOpType.ADD, ItemSource.HA, "Eggs", "a1")
 
         # Now Alexa returns that item
-        result = await sync_engine.async_sync_alexa_to_ha(
-            [make_alexa_item("a1", "Eggs")]
-        )
+        result = await sync_engine.async_sync_alexa_to_ha([make_alexa_item("a1", "Eggs")])
 
         assert result.alexa_to_ha_adds == 0
         assert result.skipped_echo == 1
         mock_ha_bridge.async_add_item.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_expired_pending_op_not_suppressed(
-        self, sync_engine, mock_ha_bridge
-    ):
+    async def test_expired_pending_op_not_suppressed(self, sync_engine, mock_ha_bridge):
         """Expired pending ops should not suppress changes."""
         sync_engine._initial_sync_done = True
         sync_engine._previous_alexa_items = []
 
         # Add an expired pending op
-        sync_engine.add_pending_op(
-            PendingOpType.ADD, ItemSource.HA, "Eggs", "a1"
-        )
+        sync_engine.add_pending_op(PendingOpType.ADD, ItemSource.HA, "Eggs", "a1")
         # Make it expired
-        sync_engine.state.pending_ops[0].created_at = (
-            time.time() - PENDING_OP_GRACE_SECONDS - 1
-        )
+        sync_engine.state.pending_ops[0].created_at = time.time() - PENDING_OP_GRACE_SECONDS - 1
 
         mock_ha_bridge.async_add_item.return_value = make_ha_item("h1", "Eggs")
 
-        result = await sync_engine.async_sync_alexa_to_ha(
-            [make_alexa_item("a1", "Eggs")]
-        )
+        result = await sync_engine.async_sync_alexa_to_ha([make_alexa_item("a1", "Eggs")])
 
         assert result.alexa_to_ha_adds == 1
 
@@ -265,9 +242,7 @@ class TestEchoSuppression:
         # Add some ops - one fresh, one expired
         sync_engine.add_pending_op(PendingOpType.ADD, ItemSource.HA, "Fresh")
         sync_engine.add_pending_op(PendingOpType.ADD, ItemSource.HA, "Old")
-        sync_engine.state.pending_ops[1].created_at = (
-            time.time() - PENDING_OP_GRACE_SECONDS * 4
-        )
+        sync_engine.state.pending_ops[1].created_at = time.time() - PENDING_OP_GRACE_SECONDS * 4
 
         sync_engine._cleanup_expired_pending_ops()
 
@@ -288,9 +263,7 @@ class TestConflictResolution:
         sync_engine._add_mapping("a1", "h1", "Milk", ItemSource.HA)
 
         # We just marked it complete from HA side
-        sync_engine.add_pending_op(
-            PendingOpType.COMPLETE, ItemSource.HA, "Milk", "a1"
-        )
+        sync_engine.add_pending_op(PendingOpType.COMPLETE, ItemSource.HA, "Milk", "a1")
 
         # Alexa now also shows a change (which is our own echo)
         new_item = make_alexa_item("a1", "Milk", complete=True)

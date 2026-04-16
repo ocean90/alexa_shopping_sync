@@ -13,20 +13,18 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import re
 import sys
 import webbrowser
 from functools import partial
 
 import httpx
+import pyotp
 from aiohttp import web
+from authcaptureproxy import AuthCaptureProxy
 from bs4 import BeautifulSoup
 from yarl import URL
-
-import base64
-import re
-
-import pyotp
-from authcaptureproxy import AuthCaptureProxy
 
 
 def normalize_otp_secret(secret: str) -> str:
@@ -38,6 +36,7 @@ def normalize_otp_secret(secret: str) -> str:
 
 def generate_otp(secret: str) -> str:
     return pyotp.TOTP(secret).now()
+
 
 HOST = "127.0.0.1"
 PORT = 18123
@@ -58,9 +57,7 @@ def _autofill(items: dict[str, str], html: str) -> str:
     return str(soup)
 
 
-async def _test_login_success(
-    resp: httpx.Response, data: dict, query: dict
-) -> URL | str | None:
+async def _test_login_success(resp: httpx.Response, data: dict, query: dict) -> URL | str | None:
     global _captured_cookies
 
     if not resp.url:
@@ -90,7 +87,10 @@ async def _test_login_success(
         passkey_indicators = ["passkey", "fido", "webauthn"]
         for indicator in passkey_indicators:
             if indicator in html_lower:
-                print(f"\n[WARN] Passkey indicator '{indicator}' on {resp_path} — ignored (not a login blocker)")
+                print(
+                    f"\n[WARN] Passkey indicator '{indicator}' on "
+                    f"{resp_path} — ignored (not a login blocker)"
+                )
                 break
 
     return None
@@ -114,7 +114,11 @@ async def _success_handler(request: web.Request) -> web.Response:
     _success_event.set()
     return web.Response(
         content_type="text/html",
-        text="<h1>Login successful!</h1><p>You can close this window.</p><script>window.close()</script>",
+        text=(
+            "<h1>Login successful!</h1>"
+            "<p>You can close this window.</p>"
+            "<script>window.close()</script>"
+        ),
     )
 
 

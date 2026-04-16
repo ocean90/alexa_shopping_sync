@@ -9,10 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import time
-from dataclasses import dataclass, field
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
+
 
 # ---------------------------------------------------------------------------
 # Minimal stubs so sync_engine.py can be imported without homeassistant
@@ -62,23 +60,23 @@ def _make_ha_mocks():
 
 _make_ha_mocks()
 
-# Now we can import our modules
+# Now we can import our modules (must happen after mocks are set up)
 sys.path.insert(0, ".")
-from custom_components.alexa_shopping_sync.const import (
+from custom_components.alexa_shopping_sync.const import (  # noqa: E402
     InitialSyncMode,
     SyncMode,
 )
-from custom_components.alexa_shopping_sync.models import (
+from custom_components.alexa_shopping_sync.models import (  # noqa: E402
     AlexaShoppingItem,
     HAShoppingItem,
     ItemSource,
 )
-from custom_components.alexa_shopping_sync.sync_engine import SyncEngine
-
+from custom_components.alexa_shopping_sync.sync_engine import SyncEngine  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def alexa(item_id: str, name: str, complete: bool = False) -> AlexaShoppingItem:
     return AlexaShoppingItem(item_id=item_id, name=name, complete=complete)
@@ -141,10 +139,13 @@ async def test_initial_sync_matching():
     print("\n[test_initial_sync_matching]")
     engine, amazon, ha_bridge = make_engine()
 
-    alexa_items = [alexa("a1", "Kaffee"), alexa("a2", "Salat"),
-                   alexa("a3", "Bananen"), alexa("a4", "Eier")]
-    ha_items = [ha("h1", "Kaffee"), ha("h2", "Salat"),
-                ha("h3", "Bananen"), ha("h4", "Eier")]
+    alexa_items = [
+        alexa("a1", "Kaffee"),
+        alexa("a2", "Salat"),
+        alexa("a3", "Bananen"),
+        alexa("a4", "Eier"),
+    ]
+    ha_items = [ha("h1", "Kaffee"), ha("h2", "Salat"), ha("h3", "Bananen"), ha("h4", "Eier")]
 
     result = await engine.async_initial_sync(alexa_items, ha_items)
 
@@ -172,8 +173,7 @@ async def test_warm_start_no_duplicates():
 
     check("no adds on warm start", result.alexa_to_ha_adds == 0)
     check("ha_bridge.async_add_item not called", ha_bridge.async_add_item.call_count == 0)
-    check("previous_alexa_items set as baseline",
-          len(engine._previous_alexa_items) == 2)
+    check("previous_alexa_items set as baseline", len(engine._previous_alexa_items) == 2)
 
 
 async def test_warm_start_ha_side():
@@ -198,10 +198,13 @@ async def test_full_resync_no_duplicates():
     print("\n[test_full_resync_no_duplicates]")
     engine, amazon, ha_bridge = make_engine()
 
-    alexa_items = [alexa("a1", "Kaffee"), alexa("a2", "Salat"),
-                   alexa("a3", "Bananen"), alexa("a4", "Eier")]
-    ha_items = [ha("h1", "Kaffee"), ha("h2", "Salat"),
-                ha("h3", "Bananen"), ha("h4", "Eier")]
+    alexa_items = [
+        alexa("a1", "Kaffee"),
+        alexa("a2", "Salat"),
+        alexa("a3", "Bananen"),
+        alexa("a4", "Eier"),
+    ]
+    ha_items = [ha("h1", "Kaffee"), ha("h2", "Salat"), ha("h3", "Bananen"), ha("h4", "Eier")]
 
     amazon.async_get_snapshot.return_value = alexa_items
     ha_bridge.async_get_items.return_value = ha_items
@@ -220,10 +223,13 @@ async def test_poll_after_full_resync_no_duplicates():
     print("\n[test_poll_after_full_resync_no_duplicates]")
     engine, amazon, ha_bridge = make_engine()
 
-    alexa_items = [alexa("a1", "Kaffee"), alexa("a2", "Salat"),
-                   alexa("a3", "Bananen"), alexa("a4", "Eier")]
-    ha_items = [ha("h1", "Kaffee"), ha("h2", "Salat"),
-                ha("h3", "Bananen"), ha("h4", "Eier")]
+    alexa_items = [
+        alexa("a1", "Kaffee"),
+        alexa("a2", "Salat"),
+        alexa("a3", "Bananen"),
+        alexa("a4", "Eier"),
+    ]
+    ha_items = [ha("h1", "Kaffee"), ha("h2", "Salat"), ha("h3", "Bananen"), ha("h4", "Eier")]
 
     amazon.async_get_snapshot.return_value = alexa_items
     ha_bridge.async_get_items.return_value = ha_items
@@ -254,9 +260,17 @@ async def test_warm_start_unmapped_alexa_item():
 
     result = await engine.async_sync_alexa_to_ha(alexa_items)
 
-    check("unmapped item synced to HA", result.alexa_to_ha_adds == 1, str(result.alexa_to_ha_adds))
+    check(
+        "unmapped item synced to HA",
+        result.alexa_to_ha_adds == 1,
+        str(result.alexa_to_ha_adds),
+    )
     ha_bridge.async_add_item.assert_called_once_with("Milch", False)
-    check("2 mappings after warm start", len(engine.state.mappings) == 2, str(len(engine.state.mappings)))
+    check(
+        "2 mappings after warm start",
+        len(engine.state.mappings) == 2,
+        str(len(engine.state.mappings)),
+    )
 
 
 async def test_warm_start_unmapped_ha_item():
@@ -273,9 +287,17 @@ async def test_warm_start_unmapped_ha_item():
 
     result = await engine.async_sync_ha_to_alexa(ha_items)
 
-    check("unmapped item synced to Alexa", result.ha_to_alexa_adds == 1, str(result.ha_to_alexa_adds))
+    check(
+        "unmapped item synced to Alexa",
+        result.ha_to_alexa_adds == 1,
+        str(result.ha_to_alexa_adds),
+    )
     amazon.async_add_item.assert_called_once_with("Milch", False)
-    check("2 mappings after warm start", len(engine.state.mappings) == 2, str(len(engine.state.mappings)))
+    check(
+        "2 mappings after warm start",
+        len(engine.state.mappings) == 2,
+        str(len(engine.state.mappings)),
+    )
 
 
 async def test_new_item_after_warm_start():
@@ -302,6 +324,7 @@ async def test_new_item_after_warm_start():
 # Main
 # ---------------------------------------------------------------------------
 
+
 async def run_all():
     await test_initial_sync_matching()
     await test_warm_start_no_duplicates()
@@ -314,7 +337,7 @@ async def run_all():
 
     print()
     if _failed == 0:
-        print(f"\033[32mAll tests passed.\033[0m")
+        print("\033[32mAll tests passed.\033[0m")
     else:
         print(f"\033[31m{_failed} test(s) failed.\033[0m")
         sys.exit(1)

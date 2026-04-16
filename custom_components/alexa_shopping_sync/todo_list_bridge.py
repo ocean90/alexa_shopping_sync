@@ -78,9 +78,7 @@ class TodoListBridge:
                 )
         return items
 
-    async def async_add_item(
-        self, name: str, complete: bool = False
-    ) -> HAShoppingItem | None:
+    async def async_add_item(self, name: str, complete: bool = False) -> HAShoppingItem | None:
         """Add an item to the todo entity.
 
         Uses diff approach: snapshot before → add → snapshot after → find
@@ -143,18 +141,14 @@ class TodoListBridge:
                 return item
         return None
 
-    async def async_mark_complete(
-        self, item_id: str, complete: bool
-    ) -> HAShoppingItem | None:
+    async def async_mark_complete(self, item_id: str, complete: bool) -> HAShoppingItem | None:
         """Toggle completion status of a todo item."""
         return await self.async_update_item(item_id, complete=complete)
 
     async def async_delete_item(self, item_id: str) -> bool:
         """Delete an item from the todo entity."""
         try:
-            await self._async_call_service(
-                "remove_item", data={"item": [item_id]}
-            )
+            await self._async_call_service("remove_item", data={"item": [item_id]})
             return True
         except Exception as err:
             _LOGGER.error(

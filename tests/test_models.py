@@ -2,18 +2,15 @@
 
 from __future__ import annotations
 
-import pytest
-
+from custom_components.alexa_shopping_sync.const import PendingOpType
 from custom_components.alexa_shopping_sync.models import (
     AlexaShoppingItem,
-    HAShoppingItem,
     ItemMapping,
     ItemSource,
     PendingOperation,
     SyncState,
     normalize_name,
 )
-from custom_components.alexa_shopping_sync.const import PendingOpType
 
 
 class TestNormalizeName:
@@ -121,13 +118,9 @@ class TestSyncState:
             shopping_list_id="list-1",
             last_successful_sync="999",
         )
-        state.mappings.append(
-            ItemMapping("a1", "h1", "Milk", "123", ItemSource.ALEXA)
-        )
+        state.mappings.append(ItemMapping("a1", "h1", "Milk", "123", ItemSource.ALEXA))
         state.pending_ops.append(
-            PendingOperation(
-                PendingOpType.ADD, ItemSource.HA, "Bread", "t1", 100.0
-            )
+            PendingOperation(PendingOpType.ADD, ItemSource.HA, "Bread", "t1", 100.0)
         )
 
         d = state.to_dict()

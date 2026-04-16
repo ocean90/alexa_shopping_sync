@@ -82,9 +82,7 @@ async def test_add_item(bridge, mock_hass):
                 return {ENTITY_ID: {"items": []}}
             return {
                 ENTITY_ID: {
-                    "items": [
-                        {"uid": "new-uid", "summary": "Eggs", "status": "needs_action"}
-                    ]
+                    "items": [{"uid": "new-uid", "summary": "Eggs", "status": "needs_action"}]
                 }
             }
         return None
@@ -112,9 +110,7 @@ async def test_add_item_complete(bridge, mock_hass):
                 return {ENTITY_ID: {"items": []}}
             return {
                 ENTITY_ID: {
-                    "items": [
-                        {"uid": "new-uid", "summary": "Done Item", "status": "needs_action"}
-                    ]
+                    "items": [{"uid": "new-uid", "summary": "Done Item", "status": "needs_action"}]
                 }
             }
         return None
@@ -139,9 +135,7 @@ async def test_update_item(bridge, mock_hass):
     mock_hass.services.async_call = AsyncMock(
         return_value={
             ENTITY_ID: {
-                "items": [
-                    {"uid": "uid-1", "summary": "Oat Milk", "status": "needs_action"}
-                ]
+                "items": [{"uid": "uid-1", "summary": "Oat Milk", "status": "needs_action"}]
             }
         }
     )

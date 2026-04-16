@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
-from typing import Any
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -65,15 +63,12 @@ async def async_setup_entry(
     coordinator: AlexaShoppingCoordinator = entry.runtime_data
 
     entities = [
-        AlexaShoppingSensor(coordinator, entry, description)
-        for description in SENSOR_DESCRIPTIONS
+        AlexaShoppingSensor(coordinator, entry, description) for description in SENSOR_DESCRIPTIONS
     ]
     async_add_entities(entities)
 
 
-class AlexaShoppingSensor(
-    CoordinatorEntity[AlexaShoppingCoordinator], SensorEntity
-):
+class AlexaShoppingSensor(CoordinatorEntity[AlexaShoppingCoordinator], SensorEntity):
     """Sensor entity for Alexa Shopping List Sync."""
 
     _attr_has_entity_name = True

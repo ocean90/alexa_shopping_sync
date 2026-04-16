@@ -19,9 +19,7 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
 AlexaShoppingConfigEntry = ConfigEntry[AlexaShoppingCoordinator]
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, entry: AlexaShoppingConfigEntry
-) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry) -> bool:
     """Set up Alexa Shopping List Sync from a config entry."""
     # Validate the target list is available
     target_list = entry.data.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST)
@@ -81,16 +79,12 @@ async def async_setup_entry(
     return True
 
 
-async def _async_options_updated(
-    hass: HomeAssistant, entry: AlexaShoppingConfigEntry
-) -> None:
+async def _async_options_updated(hass: HomeAssistant, entry: AlexaShoppingConfigEntry) -> None:
     """Handle options update — reload entry so new poll interval takes effect."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_unload_entry(
-    hass: HomeAssistant, entry: AlexaShoppingConfigEntry
-) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry) -> bool:
     """Unload a config entry."""
     coordinator: AlexaShoppingCoordinator = entry.runtime_data
     coordinator.async_stop_event_listener()
@@ -98,9 +92,7 @@ async def async_unload_entry(
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
 
-async def async_migrate_entry(
-    hass: HomeAssistant, config_entry: ConfigEntry
-) -> bool:
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry."""
     _LOGGER.debug("Migrating from version %s", config_entry.version)
 

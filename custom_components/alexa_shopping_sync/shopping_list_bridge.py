@@ -65,9 +65,7 @@ class ShoppingListBridge:
             )
         return items
 
-    async def async_add_item(
-        self, name: str, complete: bool = False
-    ) -> HAShoppingItem | None:
+    async def async_add_item(self, name: str, complete: bool = False) -> HAShoppingItem | None:
         """Add an item to the HA shopping list."""
         shopping_data = self._get_shopping_data()
 
@@ -118,9 +116,7 @@ class ShoppingListBridge:
             )
         return None
 
-    async def async_mark_complete(
-        self, item_id: str, complete: bool
-    ) -> HAShoppingItem | None:
+    async def async_mark_complete(self, item_id: str, complete: bool) -> HAShoppingItem | None:
         """Toggle completion status of an HA item."""
         return await self.async_update_item(item_id, complete=complete)
 

@@ -12,8 +12,6 @@ from homeassistant.helpers.storage import Store
 
 from .amazon_client import AmazonShoppingClient
 from .const import (
-    DOMAIN,
-    ECHO_SUPPRESSION_WINDOW,
     MAX_PENDING_OPS,
     PENDING_OP_GRACE_SECONDS,
     STORAGE_KEY,
@@ -89,9 +87,7 @@ class SyncEngine:
         self._preserve_duplicates = preserve_duplicates
         self._mirror_completed = mirror_completed
 
-        self._store = Store[dict[str, Any]](
-            hass, STORAGE_VERSION, STORAGE_KEY
-        )
+        self._store = Store[dict[str, Any]](hass, STORAGE_VERSION, STORAGE_KEY)
         self._state = SyncState()
         self._previous_alexa_items: list[AlexaShoppingItem] = []
         self._previous_ha_items: list[HAShoppingItem] = []
@@ -224,9 +220,7 @@ class SyncEngine:
                 return m
         return None
 
-    def _add_mapping(
-        self, alexa_id: str, ha_id: str, name: str, source: ItemSource
-    ) -> ItemMapping:
+    def _add_mapping(self, alexa_id: str, ha_id: str, name: str, source: ItemSource) -> ItemMapping:
         """Add a new mapping."""
         mapping = ItemMapping(
             alexa_id=alexa_id,
@@ -240,15 +234,11 @@ class SyncEngine:
 
     def _remove_mapping_by_alexa_id(self, alexa_id: str) -> None:
         """Remove mapping by Alexa ID."""
-        self._state.mappings = [
-            m for m in self._state.mappings if m.alexa_id != alexa_id
-        ]
+        self._state.mappings = [m for m in self._state.mappings if m.alexa_id != alexa_id]
 
     def _remove_mapping_by_ha_id(self, ha_id: str) -> None:
         """Remove mapping by HA ID."""
-        self._state.mappings = [
-            m for m in self._state.mappings if m.ha_id != ha_id
-        ]
+        self._state.mappings = [m for m in self._state.mappings if m.ha_id != ha_id]
 
     def _match_item_by_name(
         self,
@@ -309,10 +299,7 @@ class SyncEngine:
             if item_id in old_by_id:
                 old_item = old_by_id[item_id]
                 new_item = new_by_id[item_id]
-                if (
-                    old_item.name != new_item.name
-                    or old_item.complete != new_item.complete
-                ):
+                if old_item.name != new_item.name or old_item.complete != new_item.complete:
                     diff.modified.append((old_item, new_item))
 
         return diff
@@ -340,10 +327,7 @@ class SyncEngine:
             if item_id in old_by_id:
                 old_item = old_by_id[item_id]
                 new_item = new_by_id[item_id]
-                if (
-                    old_item.name != new_item.name
-                    or old_item.complete != new_item.complete
-                ):
+                if old_item.name != new_item.name or old_item.complete != new_item.complete:
                     diff.modified.append((old_item, new_item))
 
         return diff
@@ -410,9 +394,7 @@ class SyncEngine:
                 # Sync completion status (alexa wins for matched items)
                 if alexa_item.complete != match.complete and self._mirror_completed:
                     try:
-                        await self._ha.async_mark_complete(
-                            match.item_id, alexa_item.complete
-                        )
+                        await self._ha.async_mark_complete(match.item_id, alexa_item.complete)
                         result.alexa_to_ha_updates += 1
                     except Exception as err:
                         result.errors.append(f"Update HA item: {err}")
@@ -425,9 +407,7 @@ class SyncEngine:
                 if not self._mirror_completed and alexa_item.complete:
                     continue
                 try:
-                    ha_item = await self._ha.async_add_item(
-                        alexa_item.name, alexa_item.complete
-                    )
+                    ha_item = await self._ha.async_add_item(alexa_item.name, alexa_item.complete)
                     if ha_item:
                         self._add_mapping(
                             alexa_item.item_id,
@@ -453,9 +433,7 @@ class SyncEngine:
                 if not self._mirror_completed and ha_item.complete:
                     continue
                 try:
-                    alexa_item = await self._amazon.async_add_item(
-                        ha_item.name, ha_item.complete
-                    )
+                    alexa_item = await self._amazon.async_add_item(ha_item.name, ha_item.complete)
                     if alexa_item:
                         self._add_mapping(
                             alexa_item.item_id,
@@ -496,9 +474,7 @@ class SyncEngine:
             if not self._mirror_completed and alexa_item.complete:
                 continue
             try:
-                ha_item = await self._ha.async_add_item(
-                    alexa_item.name, alexa_item.complete
-                )
+                ha_item = await self._ha.async_add_item(alexa_item.name, alexa_item.complete)
                 if ha_item:
                     self._add_mapping(
                         alexa_item.item_id,
@@ -533,9 +509,7 @@ class SyncEngine:
             if not self._mirror_completed and ha_item.complete:
                 continue
             try:
-                alexa_item = await self._amazon.async_add_item(
-                    ha_item.name, ha_item.complete
-                )
+                alexa_item = await self._amazon.async_add_item(ha_item.name, ha_item.complete)
                 if alexa_item:
                     self._add_mapping(
                         alexa_item.item_id,
@@ -576,8 +550,7 @@ class SyncEngine:
         # Items WITHOUT a mapping are genuinely new and must be synced.
         if not self._previous_alexa_items:
             unmapped = [
-                item for item in alexa_items
-                if not self._find_mapping_by_alexa_id(item.item_id)
+                item for item in alexa_items if not self._find_mapping_by_alexa_id(item.item_id)
             ]
             _LOGGER.debug(
                 "Warm start: %d Alexa items total, %d unmapped (will sync)",
@@ -619,9 +592,7 @@ class SyncEngine:
                 if not self._find_mapping_by_alexa_id(item.item_id):
                     # Find the HA item by name to create mapping
                     ha_items = await self._ha.async_get_items()
-                    ha_match = self._match_item_by_name(
-                        item.name, item.complete, ha_items
-                    )
+                    ha_match = self._match_item_by_name(item.name, item.complete, ha_items)
                     if ha_match:
                         self._add_mapping(
                             item.item_id,
@@ -680,21 +651,15 @@ class SyncEngine:
             if self._is_echo(PendingOpType.UPDATE, new_item.name, new_item.item_id):
                 result.skipped_echo += 1
                 continue
-            if self._is_echo(
-                PendingOpType.COMPLETE, new_item.name, new_item.item_id
-            ):
+            if self._is_echo(PendingOpType.COMPLETE, new_item.name, new_item.item_id):
                 result.skipped_echo += 1
                 continue
 
             mapping = self._find_mapping_by_alexa_id(new_item.item_id)
             if mapping:
-                update_name = (
-                    new_item.name if old_item.name != new_item.name else None
-                )
+                update_name = new_item.name if old_item.name != new_item.name else None
                 update_complete = (
-                    new_item.complete
-                    if old_item.complete != new_item.complete
-                    else None
+                    new_item.complete if old_item.complete != new_item.complete else None
                 )
 
                 if not self._mirror_completed and update_complete is not None:
@@ -750,10 +715,7 @@ class SyncEngine:
         # Warm start: same as Alexa side — items with a mapping are known,
         # items WITHOUT a mapping are genuinely new and must be synced.
         if not self._previous_ha_items:
-            unmapped = [
-                item for item in ha_items
-                if not self._find_mapping_by_ha_id(item.item_id)
-            ]
+            unmapped = [item for item in ha_items if not self._find_mapping_by_ha_id(item.item_id)]
             _LOGGER.debug(
                 "Warm start: %d HA items total, %d unmapped (will sync)",
                 len(ha_items),
@@ -796,9 +758,7 @@ class SyncEngine:
                 continue
 
             try:
-                alexa_item = await self._amazon.async_add_item(
-                    item.name, item.complete
-                )
+                alexa_item = await self._amazon.async_add_item(item.name, item.complete)
                 if alexa_item:
                     self._add_mapping(
                         alexa_item.item_id,
@@ -844,21 +804,15 @@ class SyncEngine:
             if self._is_echo(PendingOpType.UPDATE, new_item.name, new_item.item_id):
                 result.skipped_echo += 1
                 continue
-            if self._is_echo(
-                PendingOpType.COMPLETE, new_item.name, new_item.item_id
-            ):
+            if self._is_echo(PendingOpType.COMPLETE, new_item.name, new_item.item_id):
                 result.skipped_echo += 1
                 continue
 
             mapping = self._find_mapping_by_ha_id(new_item.item_id)
             if mapping:
-                update_name = (
-                    new_item.name if old_item.name != new_item.name else None
-                )
+                update_name = new_item.name if old_item.name != new_item.name else None
                 update_complete = (
-                    new_item.complete
-                    if old_item.complete != new_item.complete
-                    else None
+                    new_item.complete if old_item.complete != new_item.complete else None
                 )
 
                 if not self._mirror_completed and update_complete is not None:

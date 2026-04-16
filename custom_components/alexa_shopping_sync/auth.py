@@ -7,7 +7,6 @@ import logging
 import re
 import secrets
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 import pyotp
@@ -22,18 +21,14 @@ from .const import (
     AMAZON_DEVICE_TYPE,
     AMAZON_EXCHANGE_TOKEN_URL_TEMPLATE,
     AMAZON_OS_VERSION,
-    AMAZON_REGISTER_DEVICE_URL_TEMPLATE,
     AMAZON_SOFTWARE_VERSION,
     AMAZON_USER_AGENT,
     AMAZON_USER_AGENT_DEVICE,
     CAPTCHA_INDICATORS,
-    HTTP_TIMEOUT,
     PASSKEY_INDICATORS,
     UNSUPPORTED_FLOW_INDICATORS,
 )
 from .exceptions import (
-    AuthenticationError,
-    CaptchaNotCompletedError,
     OTPSecretInvalidError,
     PasskeyDetectedError,
     SessionExpiredError,
@@ -72,9 +67,7 @@ def normalize_otp_secret(secret: str) -> str:
         padding = (8 - len(cleaned) % 8) % 8
         base64.b32decode(cleaned + "=" * padding)
     except Exception as err:
-        raise OTPSecretInvalidError(
-            f"Invalid OTP secret: not valid base32 encoding"
-        ) from err
+        raise OTPSecretInvalidError("Invalid OTP secret: not valid base32 encoding") from err
 
     # Validate reasonable length (16-64 chars covers common TOTP secrets)
     if len(cleaned) < 16 or len(cleaned) > 64:
@@ -205,9 +198,7 @@ class AuthManager:
                 self._session.cookies.clear()
                 for k, v in cookies.items():
                     self._session.cookies.set(k, v)
-        _LOGGER.debug(
-            "Session marked as authenticated (cookies=%d)", len(cookies or {})
-        )
+        _LOGGER.debug("Session marked as authenticated (cookies=%d)", len(cookies or {}))
 
     def mark_session_expired(self) -> None:
         """Mark the session as expired."""
@@ -311,9 +302,7 @@ class AuthManager:
                 },
             ) as client:
                 resp = await client.post(url, data=data)
-                _LOGGER.debug(
-                    "Token exchange: status=%d url=%s", resp.status_code, resp.url
-                )
+                _LOGGER.debug("Token exchange: status=%d url=%s", resp.status_code, resp.url)
 
                 if resp.status_code != 200:
                     _LOGGER.warning(
@@ -334,9 +323,7 @@ class AuthManager:
                     return False
 
                 cookies_by_domain = (
-                    response_json.get("response", {})
-                    .get("tokens", {})
-                    .get("cookies", {})
+                    response_json.get("response", {}).get("tokens", {}).get("cookies", {})
                 )
                 if not cookies_by_domain:
                     _LOGGER.warning(
@@ -363,9 +350,7 @@ class AuthManager:
                     )
 
                 if not new_cookies:
-                    _LOGGER.warning(
-                        "Token exchange: all cookies empty after parsing"
-                    )
+                    _LOGGER.warning("Token exchange: all cookies empty after parsing")
                     return False
 
                 if not self._session or self._session.is_closed:
@@ -375,14 +360,10 @@ class AuthManager:
 
                 if not await self.async_validate_session():
                     self._authenticated = False
-                    _LOGGER.warning(
-                        "Token exchange: cookies received but API validation failed"
-                    )
+                    _LOGGER.warning("Token exchange: cookies received but API validation failed")
                     return False
 
-                _LOGGER.warning(
-                    "Token exchange succeeded (%d cookies)", len(new_cookies)
-                )
+                _LOGGER.warning("Token exchange succeeded (%d cookies)", len(new_cookies))
                 return True
         except Exception as err:
             _LOGGER.warning("Token exchange failed: %s", err, exc_info=True)
@@ -629,12 +610,8 @@ async def async_register_device(
                 },
                 cookies=cookies,  # session cookies sent as HTTP cookies (not in JSON)
             ) as client:
-                resp = await client.post(
-                    f"https://api.{domain}/auth/register", json=payload
-                )
-                _LOGGER.debug(
-                    "Device registration (%s): status=%d", domain, resp.status_code
-                )
+                resp = await client.post(f"https://api.{domain}/auth/register", json=payload)
+                _LOGGER.debug("Device registration (%s): status=%d", domain, resp.status_code)
 
                 if resp.status_code == 200:
                     data = resp.json()
@@ -646,9 +623,7 @@ async def async_register_device(
                         .get("refresh_token")
                     )
                     if refresh_token:
-                        _LOGGER.debug(
-                            "Device registration succeeded with %s", domain
-                        )
+                        _LOGGER.debug("Device registration succeeded with %s", domain)
                         return refresh_token
                     _LOGGER.warning(
                         "Device registration (%s): unexpected response: %s",

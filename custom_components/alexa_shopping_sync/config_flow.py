@@ -38,7 +38,6 @@ from yarl import URL
 
 from .auth import (
     async_register_device,
-    check_page_for_captcha,
     check_page_for_unsupported_flow,
     generate_otp,
     normalize_otp_secret,
@@ -65,7 +64,6 @@ from .const import (
     DOMAIN,
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
-    PASSKEY_INDICATORS,
     TARGET_SHOPPING_LIST,
     InitialSyncMode,
     SyncMode,
@@ -123,13 +121,9 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         # Generated once per flow instance so proxy and registration always match.
         self._device_serial: str = binascii.b2a_hex(os.urandom(16)).decode("utf-8")
         _cv_raw = os.urandom(32)
-        self._code_verifier: str = (
-            base64.urlsafe_b64encode(_cv_raw).rstrip(b"=").decode()
-        )
+        self._code_verifier: str = base64.urlsafe_b64encode(_cv_raw).rstrip(b"=").decode()
         self._code_challenge: str = (
-            base64.urlsafe_b64encode(
-                hashlib.sha256(self._code_verifier.encode()).digest()
-            )
+            base64.urlsafe_b64encode(hashlib.sha256(self._code_verifier.encode()).digest())
             .rstrip(b"=")
             .decode()
         )
@@ -143,16 +137,13 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         """Get the options flow."""
         return AlexaShoppingOptionsFlow(config_entry)
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step - Amazon account details."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            await self.async_set_unique_id(
-                f"{user_input[CONF_EMAIL]}_{user_input.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN)}"
-            )
+            domain = user_input.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN)
+            await self.async_set_unique_id(f"{user_input[CONF_EMAIL]}_{domain}")
             self._abort_if_unique_id_configured()
 
             ha_url = user_input.get(CONF_HA_URL, "")
@@ -185,9 +176,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_AMAZON_DOMAIN, default=DEFAULT_AMAZON_DOMAIN
-                    ): str,
+                    vol.Required(CONF_AMAZON_DOMAIN, default=DEFAULT_AMAZON_DOMAIN): str,
                     vol.Required(CONF_EMAIL): str,
                     vol.Required(CONF_PASSWORD): str,
                     vol.Required(CONF_OTP_SECRET): str,
@@ -203,11 +192,9 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Start the auth capture proxy and redirect user to it.
 
-        Flow: user -> start_proxy -> [external browser] -> check_proxy -> finish_proxy -> sync_options
+        Flow: user -> start_proxy -> check_proxy -> finish_proxy -> sync_options
         """
-        amazon_domain = self._user_input.get(
-            CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN
-        )
+        amazon_domain = self._user_input.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN)
         email = self._user_input[CONF_EMAIL]
         password = self._user_input[CONF_PASSWORD]
         otp_secret = normalize_otp_secret(self._user_input[CONF_OTP_SECRET])
@@ -227,9 +214,17 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         # exchanged for a long-lived refresh_token via device registration.
         amazon_tld = "." + amazon_domain.split(".", 1)[-1]  # ".de" from "amazon.de"
         _locale_map = {
-            ".de": "de_DE", ".com.au": "en_AU", ".ca": "en_CA", ".co.uk": "en_GB",
-            ".in": "en_IN", ".com": "en_US", ".es": "es_ES", ".fr": "fr_FR",
-            ".it": "it_IT", ".co.jp": "ja_JP", ".com.br": "pt_BR",
+            ".de": "de_DE",
+            ".com.au": "en_AU",
+            ".ca": "en_CA",
+            ".co.uk": "en_GB",
+            ".in": "en_IN",
+            ".com": "en_US",
+            ".es": "es_ES",
+            ".fr": "fr_FR",
+            ".it": "it_IT",
+            ".co.jp": "ja_JP",
+            ".com.br": "pt_BR",
         }
         language = _locale_map.get(amazon_tld, "en_US")
         # Always use amazon.com — /ap/register only exists on .com (not .de etc.)
@@ -265,9 +260,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                     URL(login_url),
                 )
                 self._proxy.session_factory = lambda: httpx.AsyncClient(
-                    timeout=httpx.Timeout(
-                        connect=30.0, read=120.0, write=30.0, pool=30.0
-                    ),
+                    timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
                 )
             except ValueError as ex:
                 _LOGGER.error("Failed to create proxy: %s", ex)
@@ -304,9 +297,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Build callback URL that HA will hit when login succeeds
         callback_url = (
-            URL(ha_url)
-            .with_path(AUTH_CALLBACK_PATH)
-            .with_query({"flow_id": self.flow_id})
+            URL(ha_url).with_path(AUTH_CALLBACK_PATH).with_query({"flow_id": self.flow_id})
         )
 
         # Build proxy URL with flow ID and callback
@@ -317,9 +308,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         _LOGGER.debug("Proxy started, directing user to: %s", proxy_url)
 
         # Use external step: opens browser, waits for callback
-        return self.async_external_step(
-            step_id="check_proxy", url=str(proxy_url)
-        )
+        return self.async_external_step(step_id="check_proxy", url=str(proxy_url))
 
     async def _test_login_success(
         self, resp: httpx.Response, data: dict, query: dict
@@ -345,9 +334,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             auth_code = resp_url.query.get("openid.oa2.authorization_code")
             if auth_code:
                 self._authorization_code = auth_code
-                _LOGGER.debug(
-                    "Captured OAuth authorization_code for device registration"
-                )
+                _LOGGER.debug("Captured OAuth authorization_code for device registration")
             else:
                 _LOGGER.debug(
                     "No authorization_code in maplanding URL "
@@ -360,10 +347,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
 
             if callback_url:
                 return URL(callback_url)
-            return (
-                f"Successfully logged in for flow {config_flow_id}. "
-                "Please close this window."
-            )
+            return f"Successfully logged in for flow {config_flow_id}. Please close this window."
 
         # Also check if we ended up on the main site (authenticated)
         if (
@@ -397,9 +381,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except UnsupportedLoginFlowError:
                 self._login_error = "unsupported_login_flow"
-                _LOGGER.warning(
-                    "Unsupported Amazon login flow detected on %s", resp_path
-                )
+                _LOGGER.warning("Unsupported Amazon login flow detected on %s", resp_path)
             except Exception:
                 pass
 
@@ -478,9 +460,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             code_verifier=self._code_verifier,
         )
         if refresh_token:
-            _LOGGER.info(
-                "Device registration succeeded — silent token refresh enabled"
-            )
+            _LOGGER.info("Device registration succeeded — silent token refresh enabled")
         else:
             _LOGGER.warning(
                 "Device registration failed — silent refresh unavailable "
@@ -525,9 +505,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         # Build options: built-in shopping list + all todo.* entities
         options: dict[str, str] = {}
         if "shopping_list" in self.hass.config.components:
-            options[TARGET_SHOPPING_LIST] = (
-                "Integrierte Einkaufsliste (shopping_list)"
-            )
+            options[TARGET_SHOPPING_LIST] = "Integrierte Einkaufsliste (shopping_list)"
 
         # Discover todo entities from the entity registry
         from homeassistant.helpers import entity_registry as er
@@ -535,12 +513,8 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         ent_reg = er.async_get(self.hass)
         for entity in ent_reg.entities.values():
             if entity.domain == "todo" and not entity.disabled:
-                friendly = (
-                    entity.name or entity.original_name or entity.entity_id
-                )
-                options[entity.entity_id] = (
-                    f"{friendly} ({entity.entity_id})"
-                )
+                friendly = entity.name or entity.original_name or entity.entity_id
+                options[entity.entity_id] = f"{friendly} ({entity.entity_id})"
 
         # Auto-select if only one option
         if len(options) == 1:
@@ -569,40 +543,30 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_create_entry(
                 title=f"Alexa ({self._user_input.get(CONF_EMAIL, 'unknown')})",
                 data={
-                    CONF_AMAZON_DOMAIN: full_config.get(
-                        CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN
-                    ),
+                    CONF_AMAZON_DOMAIN: full_config.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN),
                     CONF_EMAIL: full_config[CONF_EMAIL],
                     CONF_PASSWORD: full_config[CONF_PASSWORD],
                     CONF_OTP_SECRET: full_config[CONF_OTP_SECRET],
                     CONF_HA_URL: full_config.get(CONF_HA_URL, ""),
                     CONF_PUBLIC_URL: full_config.get(CONF_PUBLIC_URL, ""),
-                    CONF_TARGET_LIST: full_config.get(
-                        CONF_TARGET_LIST, TARGET_SHOPPING_LIST
-                    ),
+                    CONF_TARGET_LIST: full_config.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST),
                     "_cookies": full_config.get("_cookies", {}),
                     "_refresh_token": full_config.get("_refresh_token", ""),
                     "_device_serial": full_config.get("_device_serial", ""),
                 },
                 options={
-                    CONF_SYNC_MODE: full_config.get(
-                        CONF_SYNC_MODE, SyncMode.TWO_WAY
-                    ),
+                    CONF_SYNC_MODE: full_config.get(CONF_SYNC_MODE, SyncMode.TWO_WAY),
                     CONF_INITIAL_SYNC_MODE: full_config.get(
                         CONF_INITIAL_SYNC_MODE, InitialSyncMode.MERGE_UNION
                     ),
-                    CONF_POLL_INTERVAL: full_config.get(
-                        CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
-                    ),
+                    CONF_POLL_INTERVAL: full_config.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
                     CONF_PRESERVE_DUPLICATES: full_config.get(
                         CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES
                     ),
                     CONF_MIRROR_COMPLETED: full_config.get(
                         CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED
                     ),
-                    CONF_DEBUG_MODE: full_config.get(
-                        CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE
-                    ),
+                    CONF_DEBUG_MODE: full_config.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
                 },
             )
 
@@ -610,9 +574,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="sync_options",
             data_schema=vol.Schema(
                 {
-                    vol.Required(
-                        CONF_SYNC_MODE, default=SyncMode.TWO_WAY
-                    ): vol.In(
+                    vol.Required(CONF_SYNC_MODE, default=SyncMode.TWO_WAY): vol.In(
                         {
                             SyncMode.TWO_WAY: "Two-way sync",
                             SyncMode.ALEXA_TO_HA: "Alexa \u2192 Home Assistant",
@@ -629,9 +591,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                             InitialSyncMode.HA_WINS: "HA wins (overwrite Alexa)",
                         }
                     ),
-                    vol.Required(
-                        CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL
-                    ): vol.All(
+                    vol.Required(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): vol.All(
                         vol.Coerce(int),
                         vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
                     ),
@@ -643,16 +603,12 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_MIRROR_COMPLETED,
                         default=DEFAULT_MIRROR_COMPLETED,
                     ): bool,
-                    vol.Required(
-                        CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE
-                    ): bool,
+                    vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
                 }
             ),
         )
 
-    async def async_step_reauth(
-        self, entry_data: dict[str, Any]
-    ) -> ConfigFlowResult:
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
         """Handle reauth flow."""
         self._user_input = dict(entry_data)
         return await self.async_step_reauth_confirm()
@@ -740,8 +696,7 @@ class AlexaShoppingProxyView(HomeAssistantView):
 
             if (
                 remote not in cls.known_ips
-                or (datetime.datetime.now() - cls.known_ips[remote]).seconds
-                > cls.auth_seconds
+                or (datetime.datetime.now() - cls.known_ips[remote]).seconds > cls.auth_seconds
             ):
                 try:
                     flow_id = request.url.query["config_flow_id"]
@@ -775,35 +730,23 @@ class AlexaShoppingOptionsFlow(OptionsFlow):
         """Build target list options (same logic as config flow)."""
         options: dict[str, str] = {}
         if "shopping_list" in self.hass.config.components:
-            options[TARGET_SHOPPING_LIST] = (
-                "Integrierte Einkaufsliste (shopping_list)"
-            )
+            options[TARGET_SHOPPING_LIST] = "Integrierte Einkaufsliste (shopping_list)"
 
         from homeassistant.helpers import entity_registry as er
 
         ent_reg = er.async_get(self.hass)
         for entity in ent_reg.entities.values():
             if entity.domain == "todo" and not entity.disabled:
-                friendly = (
-                    entity.name
-                    or entity.original_name
-                    or entity.entity_id
-                )
-                options[entity.entity_id] = (
-                    f"{friendly} ({entity.entity_id})"
-                )
+                friendly = entity.name or entity.original_name or entity.entity_id
+                options[entity.entity_id] = f"{friendly} ({entity.entity_id})"
         return options
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle options."""
         if user_input is not None:
             # If target_list changed, update entry.data and flag for resync
             new_target = user_input.pop(CONF_TARGET_LIST, None)
-            old_target = self._config_entry.data.get(
-                CONF_TARGET_LIST, TARGET_SHOPPING_LIST
-            )
+            old_target = self._config_entry.data.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST)
             if new_target and new_target != old_target:
                 self.hass.config_entries.async_update_entry(
                     self._config_entry,
@@ -817,9 +760,7 @@ class AlexaShoppingOptionsFlow(OptionsFlow):
             return self.async_create_entry(title="", data=user_input)
 
         options = self._config_entry.options
-        current_target = self._config_entry.data.get(
-            CONF_TARGET_LIST, TARGET_SHOPPING_LIST
-        )
+        current_target = self._config_entry.data.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST)
         target_options = self._build_target_options()
 
         # Ensure current value is in the list even if entity disappeared
@@ -846,24 +787,18 @@ class AlexaShoppingOptionsFlow(OptionsFlow):
                     ),
                     vol.Required(
                         CONF_POLL_INTERVAL,
-                        default=options.get(
-                            CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
-                        ),
+                        default=options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
                     ): vol.All(
                         vol.Coerce(int),
                         vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
                     ),
                     vol.Required(
                         CONF_PRESERVE_DUPLICATES,
-                        default=options.get(
-                            CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES
-                        ),
+                        default=options.get(CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES),
                     ): bool,
                     vol.Required(
                         CONF_MIRROR_COMPLETED,
-                        default=options.get(
-                            CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED
-                        ),
+                        default=options.get(CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED),
                     ): bool,
                     vol.Required(
                         CONF_DEBUG_MODE,
