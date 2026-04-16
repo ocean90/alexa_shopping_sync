@@ -145,6 +145,11 @@
         "name": "Verbunden"
       }
     },
+    "button": {
+      "sync_now": {
+        "name": "Jetzt synchronisieren"
+      }
+    },
     "sensor": {
       "last_success": {
         "name": "Letzter erfolgreicher Sync"
@@ -160,6 +165,11 @@
       },
       "ha_items": {
         "name": "HA-Einträge"
+      }
+    },
+    "switch": {
+      "sync_enabled": {
+        "name": "Synchronisierung aktiv"
       }
     }
   }

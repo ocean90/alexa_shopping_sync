@@ -81,6 +81,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._alexa_item_count = 0
         self._ha_item_count = 0
         self._silent_refresh_tried = False
+        self._sync_enabled = True
 
         poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         poll_interval = max(poll_interval, MIN_POLL_INTERVAL)
@@ -94,6 +95,17 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             name=DOMAIN,
             update_interval=timedelta(seconds=effective_interval),
         )
+
+    @property
+    def sync_enabled(self) -> bool:
+        """Return whether sync is enabled."""
+        return self._sync_enabled
+
+    @sync_enabled.setter
+    def sync_enabled(self, value: bool) -> None:
+        """Enable or disable sync."""
+        self._sync_enabled = value
+        _LOGGER.info("Sync %s", "enabled" if value else "disabled")
 
     @property
     def connected(self) -> bool:
@@ -271,6 +283,10 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not events or not self._sync_engine or not self._ha_bridge:
             return
 
+        if not self._sync_enabled:
+            _LOGGER.debug("Skipping HA->Alexa sync: sync disabled")
+            return
+
         if not self._auth_manager or not self._auth_manager.authenticated:
             _LOGGER.debug("Skipping HA->Alexa sync: not authenticated")
             return
@@ -310,6 +326,15 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         processing or full_resync, which could cause duplicate items.
         """
         async with self._sync_lock:
+            if not self._sync_enabled:
+                return {
+                    "alexa_items": self._alexa_item_count,
+                    "ha_items": self._ha_item_count,
+                    "last_sync": self._last_success,
+                    "connected": self._connected,
+                    "sync_enabled": False,
+                }
+
             if not self._auth_manager or not self._amazon_client or not self._sync_engine:
                 raise UpdateFailed("Integration not fully initialized")
 

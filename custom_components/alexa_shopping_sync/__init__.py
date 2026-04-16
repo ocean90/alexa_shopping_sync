@@ -14,7 +14,12 @@ from .coordinator import AlexaShoppingCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BINARY_SENSOR]
+PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
+    Platform.BUTTON,
+    Platform.SENSOR,
+    Platform.SWITCH,
+]
 
 AlexaShoppingConfigEntry = ConfigEntry[AlexaShoppingCoordinator]
 
