@@ -78,11 +78,15 @@
       "init": {
         "title": "Alexa-Einkaufslisten-Sync Optionen",
         "data": {
+          "target_list": "Ziel-Liste",
           "sync_mode": "Sync-Modus",
           "poll_interval": "Abfrage-Intervall (Sekunden)",
           "preserve_duplicates": "Duplikate beibehalten",
           "mirror_completed": "Erledigte Einträge synchronisieren",
           "debug_mode": "Debug-Logging aktivieren"
+        },
+        "data_description": {
+          "target_list": "Das Ändern der Ziel-Liste löscht alle Zuordnungen und löst einen vollständigen Resync aus."
         }
       }
     }

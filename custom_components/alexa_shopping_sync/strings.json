@@ -78,11 +78,15 @@
       "init": {
         "title": "Alexa Shopping List Sync Options",
         "data": {
+          "target_list": "Target List",
           "sync_mode": "Sync Mode",
           "poll_interval": "Poll Interval (seconds)",
           "preserve_duplicates": "Preserve duplicate items",
           "mirror_completed": "Sync completed items",
           "debug_mode": "Enable debug logging"
+        },
+        "data_description": {
+          "target_list": "Changing the target list will clear all item mappings and trigger a full resync."
         }
       }
     }

@@ -771,19 +771,69 @@ class AlexaShoppingOptionsFlow(OptionsFlow):
         """Initialize options flow."""
         self._config_entry = config_entry
 
+    def _build_target_options(self) -> dict[str, str]:
+        """Build target list options (same logic as config flow)."""
+        options: dict[str, str] = {}
+        if "shopping_list" in self.hass.config.components:
+            options[TARGET_SHOPPING_LIST] = (
+                "Integrierte Einkaufsliste (shopping_list)"
+            )
+
+        from homeassistant.helpers import entity_registry as er
+
+        ent_reg = er.async_get(self.hass)
+        for entity in ent_reg.entities.values():
+            if entity.domain == "todo" and not entity.disabled:
+                friendly = (
+                    entity.name
+                    or entity.original_name
+                    or entity.entity_id
+                )
+                options[entity.entity_id] = (
+                    f"{friendly} ({entity.entity_id})"
+                )
+        return options
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
         """Handle options."""
         if user_input is not None:
+            # If target_list changed, update entry.data and flag for resync
+            new_target = user_input.pop(CONF_TARGET_LIST, None)
+            old_target = self._config_entry.data.get(
+                CONF_TARGET_LIST, TARGET_SHOPPING_LIST
+            )
+            if new_target and new_target != old_target:
+                self.hass.config_entries.async_update_entry(
+                    self._config_entry,
+                    data={
+                        **self._config_entry.data,
+                        CONF_TARGET_LIST: new_target,
+                        "_target_list_changed": True,
+                    },
+                )
+
             return self.async_create_entry(title="", data=user_input)
 
         options = self._config_entry.options
+        current_target = self._config_entry.data.get(
+            CONF_TARGET_LIST, TARGET_SHOPPING_LIST
+        )
+        target_options = self._build_target_options()
+
+        # Ensure current value is in the list even if entity disappeared
+        if current_target not in target_options:
+            target_options[current_target] = current_target
 
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(
                 {
+                    vol.Required(
+                        CONF_TARGET_LIST,
+                        default=current_target,
+                    ): vol.In(target_options),
                     vol.Required(
                         CONF_SYNC_MODE,
                         default=options.get(CONF_SYNC_MODE, SyncMode.TWO_WAY),

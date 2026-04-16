@@ -185,6 +185,24 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Load persisted state
         await self._sync_engine.async_load_state()
 
+        # If target list was changed via options flow, clear all mappings
+        # so the next poll triggers a fresh initial sync with the new list.
+        if data.get("_target_list_changed"):
+            _LOGGER.warning(
+                "Target list changed to %s — clearing mappings for full resync",
+                self._target_list,
+            )
+            await self._sync_engine.async_clear_state()
+            # Remove the flag so we don't clear again on next reload
+            self.hass.config_entries.async_update_entry(
+                self._entry,
+                data={
+                    k: v
+                    for k, v in data.items()
+                    if k != "_target_list_changed"
+                },
+            )
+
         # Create session (auth will happen via proxy in config flow)
         await self._auth_manager.async_create_session()
 
