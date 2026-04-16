@@ -23,6 +23,16 @@
         "title": "Amazon Login",
         "description": "Please complete the login in the browser window that opened. The OTP code will be filled automatically.\n\n[Open Login Page]({proxy_url})"
       },
+      "select_target": {
+        "title": "Target List",
+        "description": "Choose the list that Alexa items will be synced with.",
+        "data": {
+          "target_list": "Target List"
+        },
+        "data_description": {
+          "target_list": "The built-in Shopping List or any to-do list entity"
+        }
+      },
       "sync_options": {
         "title": "Sync Options",
         "data": {
@@ -59,7 +69,8 @@
     },
     "abort": {
       "already_configured": "This Amazon account is already configured",
-      "reauth_successful": "Re-authentication successful"
+      "reauth_successful": "Re-authentication successful",
+      "no_target_list_available": "No target list available. Please set up the Shopping List integration or a to-do list integration first."
     }
   },
   "options": {

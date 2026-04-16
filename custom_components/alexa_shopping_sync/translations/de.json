@@ -23,6 +23,16 @@
         "title": "Amazon-Anmeldung",
         "description": "Bitte schließe die Anmeldung im geöffneten Browserfenster ab. Der OTP-Code wird automatisch ausgefüllt.\n\n[Anmeldeseite öffnen]({proxy_url})"
       },
+      "select_target": {
+        "title": "Ziel-Liste",
+        "description": "Wähle die Liste, mit der Alexa-Einträge synchronisiert werden sollen.",
+        "data": {
+          "target_list": "Ziel-Liste"
+        },
+        "data_description": {
+          "target_list": "Die integrierte Einkaufsliste oder eine beliebige Aufgabenliste"
+        }
+      },
       "sync_options": {
         "title": "Sync-Optionen",
         "data": {
@@ -59,7 +69,8 @@
     },
     "abort": {
       "already_configured": "Dieses Amazon-Konto ist bereits konfiguriert",
-      "reauth_successful": "Erneute Authentifizierung erfolgreich"
+      "reauth_successful": "Erneute Authentifizierung erfolgreich",
+      "no_target_list_available": "Keine Ziel-Liste verfügbar. Bitte richte zuerst die Einkaufslisten-Integration oder eine Aufgabenlisten-Integration ein."
     }
   },
   "options": {

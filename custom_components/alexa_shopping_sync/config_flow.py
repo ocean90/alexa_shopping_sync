@@ -525,7 +525,9 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         # Build options: built-in shopping list + all todo.* entities
         options: dict[str, str] = {}
         if "shopping_list" in self.hass.config.components:
-            options[TARGET_SHOPPING_LIST] = "Built-in Shopping List"
+            options[TARGET_SHOPPING_LIST] = (
+                "Integrierte Einkaufsliste (shopping_list)"
+            )
 
         # Discover todo entities from the entity registry
         from homeassistant.helpers import entity_registry as er
@@ -533,8 +535,12 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         ent_reg = er.async_get(self.hass)
         for entity in ent_reg.entities.values():
             if entity.domain == "todo" and not entity.disabled:
-                friendly = entity.name or entity.original_name or entity.entity_id
-                options[entity.entity_id] = friendly
+                friendly = (
+                    entity.name or entity.original_name or entity.entity_id
+                )
+                options[entity.entity_id] = (
+                    f"{friendly} ({entity.entity_id})"
+                )
 
         # Auto-select if only one option
         if len(options) == 1:
