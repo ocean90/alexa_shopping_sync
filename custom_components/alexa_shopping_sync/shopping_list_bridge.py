@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 
 from .exceptions import ShoppingListMissingError
+from .ha_list_bridge import compute_snapshot_hash
 from .models import HAShoppingItem
 
 _LOGGER = logging.getLogger(__name__)
@@ -143,11 +142,4 @@ class ShoppingListBridge:
 
     def compute_snapshot_hash(self, items: list[HAShoppingItem]) -> str:
         """Compute a hash of the snapshot for change detection."""
-        content = json.dumps(
-            [
-                {"id": i.item_id, "name": i.name, "complete": i.complete}
-                for i in sorted(items, key=lambda x: x.item_id)
-            ],
-            sort_keys=True,
-        )
-        return hashlib.sha256(content.encode()).hexdigest()[:16]
+        return compute_snapshot_hash(items)

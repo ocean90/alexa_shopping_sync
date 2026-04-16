@@ -56,6 +56,7 @@ from .const import (
     CONF_PRESERVE_DUPLICATES,
     CONF_PUBLIC_URL,
     CONF_SYNC_MODE,
+    CONF_TARGET_LIST,
     DEFAULT_AMAZON_DOMAIN,
     DEFAULT_DEBUG_MODE,
     DEFAULT_MIRROR_COMPLETED,
@@ -65,6 +66,7 @@ from .const import (
     MAX_POLL_INTERVAL,
     MIN_POLL_INTERVAL,
     PASSKEY_INDICATORS,
+    TARGET_SHOPPING_LIST,
     InitialSyncMode,
     SyncMode,
 )
@@ -108,7 +110,7 @@ def _autofill(items: dict[str, str], html: str) -> str:
 class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Alexa Shopping List Sync."""
 
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize."""
@@ -166,9 +168,6 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                     normalize_otp_secret(user_input[CONF_OTP_SECRET])
                 except OTPSecretInvalidError:
                     errors[CONF_OTP_SECRET] = "2fa_key_invalid"
-
-            if not errors and "shopping_list" not in self.hass.config.components:
-                errors["base"] = "shopping_list_missing"
 
             if not errors:
                 self._user_input = user_input
@@ -493,7 +492,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
             self._user_input["_refresh_token"] = refresh_token
             self._user_input["_device_serial"] = self._device_serial
 
-        # Reauth: update existing entry instead of creating a new one
+        # Reauth: update existing entry (skip target selection)
         if self.source == SOURCE_REAUTH:
             reauth_entry = self._get_reauth_entry()
             data_updates: dict[str, Any] = {
@@ -513,7 +512,46 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                 data_updates=data_updates,
             )
 
-        return await self.async_step_sync_options()
+        return await self.async_step_select_target()
+
+    async def async_step_select_target(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Let user choose the HA list to sync with."""
+        if user_input is not None:
+            self._user_input[CONF_TARGET_LIST] = user_input[CONF_TARGET_LIST]
+            return await self.async_step_sync_options()
+
+        # Build options: built-in shopping list + all todo.* entities
+        options: dict[str, str] = {}
+        if "shopping_list" in self.hass.config.components:
+            options[TARGET_SHOPPING_LIST] = "Built-in Shopping List"
+
+        # Discover todo entities from the entity registry
+        from homeassistant.helpers import entity_registry as er
+
+        ent_reg = er.async_get(self.hass)
+        for entity in ent_reg.entities.values():
+            if entity.domain == "todo" and not entity.disabled:
+                friendly = entity.name or entity.original_name or entity.entity_id
+                options[entity.entity_id] = friendly
+
+        # Auto-select if only one option
+        if len(options) == 1:
+            self._user_input[CONF_TARGET_LIST] = next(iter(options))
+            return await self.async_step_sync_options()
+
+        if not options:
+            return self.async_abort(reason="no_target_list_available")
+
+        return self.async_show_form(
+            step_id="select_target",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_TARGET_LIST): vol.In(options),
+                }
+            ),
+        )
 
     async def async_step_sync_options(
         self, user_input: dict[str, Any] | None = None
@@ -533,6 +571,9 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_OTP_SECRET: full_config[CONF_OTP_SECRET],
                     CONF_HA_URL: full_config.get(CONF_HA_URL, ""),
                     CONF_PUBLIC_URL: full_config.get(CONF_PUBLIC_URL, ""),
+                    CONF_TARGET_LIST: full_config.get(
+                        CONF_TARGET_LIST, TARGET_SHOPPING_LIST
+                    ),
                     "_cookies": full_config.get("_cookies", {}),
                     "_refresh_token": full_config.get("_refresh_token", ""),
                     "_device_serial": full_config.get("_device_serial", ""),

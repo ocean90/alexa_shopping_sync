@@ -23,6 +23,8 @@ CONF_PRESERVE_DUPLICATES: Final = "preserve_duplicates"
 CONF_MIRROR_COMPLETED: Final = "mirror_completed"
 CONF_DEBUG_MODE: Final = "debug_mode"
 CONF_SHOPPING_LIST_ID_OVERRIDE: Final = "shopping_list_id_override"
+CONF_TARGET_LIST: Final = "target_list"
+TARGET_SHOPPING_LIST: Final = "shopping_list"
 
 # Defaults
 DEFAULT_AMAZON_DOMAIN: Final = "amazon.de"

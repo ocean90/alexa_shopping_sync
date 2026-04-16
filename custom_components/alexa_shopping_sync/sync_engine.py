@@ -22,6 +22,7 @@ from .const import (
     PendingOpType,
     SyncMode,
 )
+from .ha_list_bridge import HAListBridge
 from .models import (
     AlexaShoppingItem,
     HAShoppingItem,
@@ -31,7 +32,6 @@ from .models import (
     SyncState,
     normalize_name,
 )
-from .shopping_list_bridge import ShoppingListBridge
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class SyncEngine:
         self,
         hass: HomeAssistant,
         amazon_client: AmazonShoppingClient,
-        ha_bridge: ShoppingListBridge,
+        ha_bridge: HAListBridge,
         sync_mode: SyncMode,
         initial_sync_mode: InitialSyncMode,
         preserve_duplicates: bool = True,

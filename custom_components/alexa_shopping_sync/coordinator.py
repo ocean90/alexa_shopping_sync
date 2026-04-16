@@ -11,8 +11,9 @@ from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
-from homeassistant.helpers import issue_registry as ir
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.update_coordinator import (
     DataUpdateCoordinator,
     UpdateFailed,
@@ -31,20 +32,22 @@ from .const import (
     CONF_POLL_INTERVAL,
     CONF_PRESERVE_DUPLICATES,
     CONF_SYNC_MODE,
+    CONF_TARGET_LIST,
     DEFAULT_AMAZON_DOMAIN,
-    DEFAULT_DEBUG_MODE,
     DEFAULT_MIRROR_COMPLETED,
     DEFAULT_POLL_INTERVAL,
     DEFAULT_PRESERVE_DUPLICATES,
     DOMAIN,
     MIN_POLL_INTERVAL,
+    TARGET_SHOPPING_LIST,
     InitialSyncMode,
     SyncMode,
 )
 from .exceptions import SessionExpiredError, ThrottledError
-from .models import HAShoppingItem
+from .ha_list_bridge import HAListBridge, compute_snapshot_hash
 from .shopping_list_bridge import ShoppingListBridge
 from .sync_engine import SyncEngine, SyncResult
+from .todo_list_bridge import TodoListBridge
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -64,8 +67,11 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._entry = entry
         self._auth_manager: AuthManager | None = None
         self._amazon_client: AmazonShoppingClient | None = None
-        self._ha_bridge: ShoppingListBridge | None = None
+        self._ha_bridge: HAListBridge | None = None
         self._sync_engine: SyncEngine | None = None
+        self._target_list: str = entry.data.get(
+            CONF_TARGET_LIST, TARGET_SHOPPING_LIST
+        )
         self._event_unsub: CALLBACK_TYPE | None = None
         self._mutation_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._mutation_task: asyncio.Task[None] | None = None
@@ -150,8 +156,11 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Amazon client
         self._amazon_client = AmazonShoppingClient(self._auth_manager)
 
-        # HA bridge
-        self._ha_bridge = ShoppingListBridge(self.hass)
+        # HA bridge — shopping list or todo entity
+        if self._target_list == TARGET_SHOPPING_LIST:
+            self._ha_bridge = ShoppingListBridge(self.hass)
+        else:
+            self._ha_bridge = TodoListBridge(self.hass, self._target_list)
 
         # Sync engine
         sync_mode = SyncMode(options.get(CONF_SYNC_MODE, SyncMode.TWO_WAY))
@@ -198,24 +207,31 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     @callback
     def async_start_event_listener(self) -> None:
-        """Start listening for HA shopping list events."""
+        """Start listening for HA list change events."""
         if self._event_unsub is not None:
             return
 
         @callback
-        def _on_shopping_list_updated(event: Event) -> None:
-            """Handle shopping_list_updated event."""
-            # Queue the mutation to avoid blocking the event loop
-            self._mutation_queue.put_nowait({"event": "shopping_list_updated"})
+        def _on_list_changed(event: Event) -> None:
+            """Handle list change event (shopping_list_updated or state_changed)."""
+            self._mutation_queue.put_nowait({"event": "list_changed"})
             if self._mutation_task is None or self._mutation_task.done():
                 self._mutation_task = self.hass.async_create_task(
                     self._async_process_mutation_queue()
                 )
 
-        self._event_unsub = self.hass.bus.async_listen(
-            "shopping_list_updated", _on_shopping_list_updated
-        )
-        _LOGGER.debug("Started listening for shopping_list_updated events")
+        if self._target_list == TARGET_SHOPPING_LIST:
+            self._event_unsub = self.hass.bus.async_listen(
+                "shopping_list_updated", _on_list_changed
+            )
+            _LOGGER.debug("Started listening for shopping_list_updated events")
+        else:
+            self._event_unsub = async_track_state_change_event(
+                self.hass, [self._target_list], _on_list_changed
+            )
+            _LOGGER.debug(
+                "Started listening for state_changed on %s", self._target_list
+            )
 
     @callback
     def async_stop_event_listener(self) -> None:
@@ -327,6 +343,31 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         try:
                             ha_items = await self._ha_bridge.async_get_items()
                             self._ha_item_count = len(ha_items)
+
+                            # Hybrid polling for todo targets: state_changed
+                            # doesn't fire on renames, so also check hash on
+                            # each poll cycle and sync if changed.
+                            if self._target_list != TARGET_SHOPPING_LIST:
+                                ha_hash = compute_snapshot_hash(ha_items)
+                                if (
+                                    self._sync_engine.state.last_ha_snapshot_hash
+                                    and ha_hash
+                                    != self._sync_engine.state.last_ha_snapshot_hash
+                                ):
+                                    ha_result = (
+                                        await self._sync_engine.async_sync_ha_to_alexa(
+                                            ha_items
+                                        )
+                                    )
+                                    _LOGGER.debug(
+                                        "Todo poll HA->Alexa: +%d ~%d -%d",
+                                        ha_result.ha_to_alexa_adds,
+                                        ha_result.ha_to_alexa_updates,
+                                        ha_result.ha_to_alexa_deletes,
+                                    )
+                                self._sync_engine.state.last_ha_snapshot_hash = (
+                                    ha_hash
+                                )
                         except Exception:
                             pass
 
