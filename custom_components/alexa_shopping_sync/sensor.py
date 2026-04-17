@@ -38,21 +38,18 @@ SENSOR_DESCRIPTIONS = [
         translation_key="pending_operations",
         icon="mdi:sync",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="ops",
     ),
     SensorEntityDescription(
         key="alexa_items",
         translation_key="alexa_items",
         icon="mdi:format-list-bulleted",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="items",
     ),
     SensorEntityDescription(
         key="ha_items",
         translation_key="ha_items",
         icon="mdi:format-list-checks",
         state_class=SensorStateClass.MEASUREMENT,
-        native_unit_of_measurement="items",
     ),
     SensorEntityDescription(
         key="target_list",
@@ -129,7 +126,7 @@ class AlexaShoppingSensor(CoordinatorEntity[AlexaShoppingCoordinator], SensorEnt
             return None
 
         if key == "last_error":
-            return self.coordinator.last_error or "None"
+            return self.coordinator.last_error or None
 
         if key == "pending_operations":
             return self.coordinator.pending_operations_count
