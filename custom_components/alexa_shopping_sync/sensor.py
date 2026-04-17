@@ -54,6 +54,12 @@ SENSOR_DESCRIPTIONS = [
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement="items",
     ),
+    SensorEntityDescription(
+        key="target_list",
+        translation_key="target_list",
+        icon="mdi:format-list-bulleted-type",
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
 ]
 
 
@@ -133,5 +139,8 @@ class AlexaShoppingSensor(CoordinatorEntity[AlexaShoppingCoordinator], SensorEnt
 
         if key == "ha_items":
             return self.coordinator.ha_item_count
+
+        if key == "target_list":
+            return self.coordinator.target_list
 
         return None

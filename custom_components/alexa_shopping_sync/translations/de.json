@@ -165,6 +165,9 @@
       },
       "ha_items": {
         "name": "HA-Einträge"
+      },
+      "target_list": {
+        "name": "Ziel-Liste"
       }
     },
     "switch": {

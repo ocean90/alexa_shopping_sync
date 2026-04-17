@@ -97,6 +97,11 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     @property
+    def target_list(self) -> str:
+        """Return the configured target list identifier."""
+        return self._target_list
+
+    @property
     def sync_enabled(self) -> bool:
         """Return whether sync is enabled."""
         return self._sync_enabled
