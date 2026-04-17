@@ -298,6 +298,11 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 result = await self._sync_engine.async_sync_ha_to_alexa(ha_items)
                 await self._sync_engine.async_save_state()
 
+                # Update alexa count after mutations so sensors reflect
+                # the new state immediately instead of waiting for next poll.
+                self._alexa_item_count += result.ha_to_alexa_adds
+                self._alexa_item_count -= result.ha_to_alexa_deletes
+
             if result.errors:
                 _LOGGER.warning(
                     "HA->Alexa sync had %d errors: %s",
@@ -312,6 +317,9 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 result.ha_to_alexa_deletes,
                 result.skipped_echo,
             )
+
+            # Notify entities so sensors update without waiting for next poll
+            self.async_set_updated_data(self.data or {})
         except SessionExpiredError:
             if not await self._async_try_silent_refresh():
                 self._trigger_reauth()
