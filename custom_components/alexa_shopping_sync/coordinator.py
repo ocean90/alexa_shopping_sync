@@ -559,8 +559,15 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await async_register_services(self.hass, self)
 
     async def async_force_refresh(self) -> None:
-        """Force an immediate refresh cycle."""
-        await self.async_request_refresh()
+        """Force an immediate refresh cycle, even when sync is paused."""
+        was_disabled = not self._sync_enabled
+        if was_disabled:
+            self._sync_enabled = True
+        try:
+            await self.async_request_refresh()
+        finally:
+            if was_disabled:
+                self._sync_enabled = False
 
     async def async_full_resync(self) -> SyncResult | None:
         """Perform a full resync."""
