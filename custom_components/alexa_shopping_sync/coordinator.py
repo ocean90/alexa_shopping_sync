@@ -81,7 +81,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._alexa_item_count = 0
         self._ha_item_count = 0
         self._silent_refresh_tried = False
-        self._sync_enabled = True
+        self._sync_enabled = entry.data.get("_sync_enabled", True)
 
         poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         poll_interval = max(poll_interval, MIN_POLL_INTERVAL)

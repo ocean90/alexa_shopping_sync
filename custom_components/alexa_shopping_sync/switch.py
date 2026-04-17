@@ -55,9 +55,18 @@ class AlexaSyncEnabledSwitch(CoordinatorEntity[AlexaShoppingCoordinator], Switch
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Enable sync."""
         self.coordinator.sync_enabled = True
+        self._persist_state(True)
         self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Disable sync."""
         self.coordinator.sync_enabled = False
+        self._persist_state(False)
         self.async_write_ha_state()
+
+    def _persist_state(self, enabled: bool) -> None:
+        """Persist sync_enabled to config entry data so it survives restarts."""
+        self.hass.config_entries.async_update_entry(
+            self.coordinator.config_entry,
+            data={**self.coordinator.config_entry.data, "_sync_enabled": enabled},
+        )
