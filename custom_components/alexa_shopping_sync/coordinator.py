@@ -82,6 +82,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._ha_item_count = 0
         self._silent_refresh_tried = False
         self._sync_enabled = entry.data.get("_sync_enabled", True)
+        self._force_once = False
 
         poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         poll_interval = max(poll_interval, MIN_POLL_INTERVAL)
@@ -339,7 +340,10 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         processing or full_resync, which could cause duplicate items.
         """
         async with self._sync_lock:
-            if not self._sync_enabled:
+            force_once = self._force_once
+            self._force_once = False
+
+            if not self._sync_enabled and not force_once:
                 return {
                     "alexa_items": self._alexa_item_count,
                     "ha_items": self._ha_item_count,
@@ -573,14 +577,8 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
     async def async_force_refresh(self) -> None:
         """Force an immediate refresh cycle, even when sync is paused."""
-        was_disabled = not self._sync_enabled
-        if was_disabled:
-            self._sync_enabled = True
-        try:
-            await self.async_request_refresh()
-        finally:
-            if was_disabled:
-                self._sync_enabled = False
+        self._force_once = True
+        await self.async_request_refresh()
 
     async def async_full_resync(self) -> SyncResult | None:
         """Perform a full resync."""
