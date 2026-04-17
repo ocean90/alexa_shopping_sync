@@ -1,12 +1,13 @@
 # Alexa Shopping List Sync
 
-A Home Assistant HACS custom integration for bidirectional synchronization between the **Amazon Alexa shopping list** and the **Home Assistant built-in shopping list**.
+A Home Assistant HACS custom integration for bidirectional synchronization between the **Amazon Alexa shopping list** and a **Home Assistant list** — either the built-in Shopping List or any to-do list entity (e.g. Cookidoo, Google Tasks, Local To-do).
 
 ## Support Matrix
 
 | Feature | Supported |
 |---|---|
 | Amazon Domain | `amazon.de` (primary) |
+| Target List | Built-in Shopping List, any `todo.*` entity |
 | 2SV via Authenticator App | Yes |
 | 2SV via SMS OTP | No |
 | Passkey Login | No |
@@ -33,7 +34,9 @@ A Home Assistant HACS custom integration for bidirectional synchronization betwe
 
 ## Prerequisites
 
-1. **Home Assistant Shopping List** must be enabled (Settings → Integrations → Add → Shopping List)
+1. A **target list** in Home Assistant — one of:
+   - The **built-in Shopping List** (Settings → Integrations → Add → Shopping List)
+   - Any **to-do list entity** from another integration (e.g. Cookidoo, Google Tasks, Local To-do)
 2. An Amazon account with **Authenticator App 2SV** enabled
 3. The **52-character TOTP secret key** from your authenticator app setup
 
@@ -57,10 +60,13 @@ A Home Assistant HACS custom integration for bidirectional synchronization betwe
    - **Authenticator App Secret**: The 52-character key
    - **Home Assistant URL**: Your HA internal URL (auto-detected)
 4. Complete the Amazon login in the browser window
-5. Configure sync options:
+5. **Choose a target list**: The built-in Shopping List or any available to-do list entity
+6. Configure sync options:
    - **Sync Mode**: Two-way, Alexa→HA, or HA→Alexa
    - **Initial Sync Mode**: Merge (union), Alexa wins, or HA wins
    - **Poll Interval**: 30-600 seconds (default: 60)
+
+The target list can be changed later in the integration options. Changing it will clear all item mappings and trigger a full resync.
 
 ## Sync Modes
 
@@ -80,14 +86,29 @@ A Home Assistant HACS custom integration for bidirectional synchronization betwe
 
 ## Entities
 
+### Controls
+
+| Entity | Type | Description |
+|---|---|---|
+| `switch.*_sync_enabled` | Switch | Enable/disable sync (persists across restarts) |
+| `button.*_sync_now` | Button | Trigger an immediate sync (works even when sync is paused) |
+
+### Sensors
+
+| Entity | Type | Description |
+|---|---|---|
+| `sensor.*_pending_operations` | Sensor | Number of pending sync operations |
+| `sensor.*_alexa_items` | Sensor | Number of items on Alexa list |
+| `sensor.*_ha_items` | Sensor | Number of items on HA list |
+
+### Diagnostics
+
 | Entity | Type | Description |
 |---|---|---|
 | `binary_sensor.*_connected` | Binary Sensor | Connection status to Amazon |
 | `sensor.*_last_success` | Sensor | Timestamp of last successful sync |
 | `sensor.*_last_error` | Sensor | Last error message |
-| `sensor.*_pending_operations` | Sensor | Number of pending sync operations |
-| `sensor.*_alexa_items` | Sensor | Number of items on Alexa list |
-| `sensor.*_ha_items` | Sensor | Number of items on HA list |
+| `sensor.*_target_list` | Sensor | The configured target list |
 
 ## Services
 
@@ -130,14 +151,15 @@ You can also manually trigger re-auth via the `mark_reauth_needed` service.
 - **Polling-based** — Alexa changes are detected by polling (default: every 60 seconds)
 - **Rate limiting** — Amazon may throttle requests; the integration backs off automatically
 - **Session expiry** — Amazon sessions expire periodically; re-authentication is required
+- **To-do list renames** — when syncing to a `todo.*` entity, item renames are detected by polling (not instantly), since the to-do platform does not emit item-level events
 
 ## Troubleshooting
 
 ### "Passkey login detected"
 Disable Passkeys in your Amazon account: Amazon Settings → Login & Security → Passkeys → Remove all passkeys, then retry.
 
-### "Shopping List not found"
-Enable the Home Assistant Shopping List integration: Settings → Integrations → Add → Shopping List.
+### "No target list available"
+Set up either the built-in Shopping List integration or a to-do list integration (e.g. Local To-do) before configuring this integration.
 
 ### "Could not find Alexa shopping list"
 The integration couldn't discover your Alexa shopping list. Check that your Alexa account has an active shopping list (say "Alexa, what's on my shopping list?").
@@ -148,7 +170,7 @@ Normal behavior — Amazon sessions expire. Follow the re-auth flow.
 ### Items not syncing
 1. Check the `binary_sensor.*_connected` entity
 2. Check `sensor.*_last_error` for error details
-3. Try the `force_refresh` service
+3. Try the `force_refresh` service or the **Sync Now** button
 4. If persistent, use `full_resync`
 
 ## License
