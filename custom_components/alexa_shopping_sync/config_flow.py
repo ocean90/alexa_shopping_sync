@@ -514,7 +514,8 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         for entity in ent_reg.entities.values():
             if entity.domain == "todo" and not entity.disabled:
                 # Skip entities no longer provided by their integration
-                if self.hass.states.get(entity.entity_id) is None:
+                state = self.hass.states.get(entity.entity_id)
+                if state is None or state.state == "unavailable":
                     continue
                 friendly = entity.name or entity.original_name or entity.entity_id
                 options[entity.entity_id] = f"{friendly} ({entity.entity_id})"
@@ -741,7 +742,8 @@ class AlexaShoppingOptionsFlow(OptionsFlow):
         for entity in ent_reg.entities.values():
             if entity.domain == "todo" and not entity.disabled:
                 # Skip entities no longer provided by their integration
-                if self.hass.states.get(entity.entity_id) is None:
+                state = self.hass.states.get(entity.entity_id)
+                if state is None or state.state == "unavailable":
                     continue
                 friendly = entity.name or entity.original_name or entity.entity_id
                 options[entity.entity_id] = f"{friendly} ({entity.entity_id})"
