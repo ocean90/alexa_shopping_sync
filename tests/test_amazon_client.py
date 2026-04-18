@@ -86,12 +86,10 @@ class TestShoppingListDiscovery:
         mock_session = AsyncMock()
         mock_auth_manager.async_get_authenticated_session.return_value = mock_session
 
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=SAMPLE_API_RESPONSE)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
-        mock_session.request = MagicMock(return_value=mock_response)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = SAMPLE_API_RESPONSE
+        mock_session.request = AsyncMock(return_value=mock_response)
 
         list_id = await client.async_discover_shopping_list_id()
 
@@ -105,12 +103,10 @@ class TestShoppingListDiscovery:
         mock_auth_manager.async_get_authenticated_session.return_value = mock_session
 
         # Empty response
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value={})
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
-        mock_session.request = MagicMock(return_value=mock_response)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {}
+        mock_session.request = AsyncMock(return_value=mock_response)
 
         with pytest.raises(AmazonListNotFoundError):
             await client.async_discover_shopping_list_id()
@@ -125,12 +121,10 @@ class TestGetSnapshot:
         mock_session = AsyncMock()
         mock_auth_manager.async_get_authenticated_session.return_value = mock_session
 
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=SAMPLE_API_RESPONSE)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
-        mock_session.request = MagicMock(return_value=mock_response)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = SAMPLE_API_RESPONSE
+        mock_session.request = AsyncMock(return_value=mock_response)
 
         items = await client.async_get_snapshot()
 
@@ -153,12 +147,10 @@ class TestGetSnapshot:
         mock_session = AsyncMock()
         mock_auth_manager.async_get_authenticated_session.return_value = mock_session
 
-        mock_response = AsyncMock()
-        mock_response.status = 200
-        mock_response.json = AsyncMock(return_value=SAMPLE_API_RESPONSE)
-        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
-        mock_response.__aexit__ = AsyncMock(return_value=False)
-        mock_session.request = MagicMock(return_value=mock_response)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = SAMPLE_API_RESPONSE
+        mock_session.request = AsyncMock(return_value=mock_response)
 
         await client.async_get_snapshot()
 
