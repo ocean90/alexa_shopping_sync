@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "alexa-shopping-sync"
 version = "0.2.0"
 description = "Home Assistant HACS integration for Alexa Shopping List sync"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     "authcaptureproxy>=1.1.4",
     "pyotp>=2.9.0",
