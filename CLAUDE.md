@@ -8,7 +8,9 @@ Home Assistant HACS custom integration that bidirectionally syncs the Amazon Ale
 
 **Primary target: amazon.de** (other domains may work but are untested). Only supports 2SV via TOTP authenticator app — no SMS OTP, no passkeys, no CAPTCHA solving.
 
-## Commit Convention
+## Branching & Commits
+
+**Never commit directly to `main`** — always create a feature branch and merge via PR.
 
 Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` — lowercase, imperative, no period.
 
