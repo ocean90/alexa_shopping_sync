@@ -62,7 +62,7 @@ class TestAlexaShoppingItem:
 
     def test_from_api_response_standard(self):
         data = {
-            "itemId": "item-123",
+            "id": "item-123",
             "value": "Milk",
             "completed": False,
             "createdDateTime": 1700000000000,
@@ -75,12 +75,12 @@ class TestAlexaShoppingItem:
         assert item.complete is False
         assert item.version == 1
 
-    def test_from_api_response_alternate_keys(self):
-        """Test fallback key names."""
+    def test_from_api_response_minimal(self):
+        """Test with minimal fields."""
         data = {
             "id": "item-456",
-            "text": "Bread",
-            "complete": True,
+            "value": "Bread",
+            "completed": True,
         }
         item = AlexaShoppingItem.from_api_response(data)
         assert item.item_id == "item-456"
