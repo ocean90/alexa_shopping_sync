@@ -76,7 +76,7 @@ The code itself runs fine on Python 3.12.
 
 ## Coding Conventions
 
-- **Python 3.12+** with `from __future__ import annotations` in every module.
+- **Python 3.12+** in practice (ruff targets `py312`, code runs fine on 3.12), though `pyproject.toml` declares `requires-python = ">=3.13"`. Use `from __future__ import annotations` in every module.
 - **Ruff** for linting and formatting — config in `pyproject.toml`: line-length 100, target `py312`, select rules `E, F, W, I`.
 - **Conventional Commits**: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` — lowercase, imperative, no period.
 - **Never commit directly to `main`** — always branch and merge via PR.
