@@ -1,7 +1,7 @@
 {
   "domain": "alexa_shopping_sync",
   "name": "Alexa Shopping List Sync",
-  "codeowners": [],
+  "codeowners": ["@ocean90"],
   "config_flow": true,
   "dependencies": ["http"],
   "after_dependencies": ["shopping_list", "todo"],
