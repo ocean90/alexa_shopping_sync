@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -e ".[dev,test]"
+        run: pip install -e ".[test]"
 
       - name: Run tests
         run: pytest --tb=short
