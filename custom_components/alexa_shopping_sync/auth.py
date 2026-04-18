@@ -327,8 +327,10 @@ class AuthManager:
                 )
                 if not cookies_by_domain:
                     _LOGGER.warning(
-                        "Token exchange: no cookies in response: %s",
-                        str(response_json)[:200],
+                        "Token exchange: no cookies in response (keys: %s)",
+                        list(response_json.keys())
+                        if isinstance(response_json, dict)
+                        else type(response_json).__name__,
                     )
                     return False
 
@@ -626,15 +628,14 @@ async def async_register_device(
                         _LOGGER.debug("Device registration succeeded with %s", domain)
                         return refresh_token
                     _LOGGER.warning(
-                        "Device registration (%s): unexpected response: %s",
+                        "Device registration (%s): unexpected response structure (keys: %s)",
                         domain,
-                        str(data)[:300],
+                        list(data.keys()) if isinstance(data, dict) else type(data).__name__,
                     )
                 else:
                     _LOGGER.warning(
-                        "Device registration failed: status=%d body=%s",
+                        "Device registration failed: status=%d",
                         resp.status_code,
-                        resp.text[:300],
                     )
         except Exception as err:
             _LOGGER.warning("Device registration (%s) exception: %s", domain, err)
