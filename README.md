@@ -1,5 +1,7 @@
 # Alexa Shopping List Sync
 
+![Logo of Alexa Shopping List Sync custom integration](/custom_components/alexa_shopping_sync/brand/logo%402x.png)
+
 A Home Assistant HACS custom integration for bidirectional synchronization between the **Amazon Alexa shopping list** and a **Home Assistant list** — either the built-in Shopping List or any to-do list entity (e.g. Cookidoo, Google Tasks, Local To-do).
 
 ## Support Matrix
