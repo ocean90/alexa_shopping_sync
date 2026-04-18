@@ -30,6 +30,7 @@ custom_components/alexa_shopping_sync/   # All integration source code
 ├── services.yaml        # Service definitions
 ├── diagnostics.py       # Diagnostics export (secrets redacted)
 ├── strings.json         # UI strings
+├── brand/               # Home Assistant branding assets (icon.png, logo.png, dark variants)
 ├── translations/        # de.json, en.json
 └── manifest.json        # HA integration manifest
 tests/                   # pytest test suite
@@ -117,8 +118,8 @@ pytest tests/test_sync_engine.py::TestClassName::test_method -v
 - Tests use `unittest.mock` (`MagicMock`, `AsyncMock`) extensively — no real network calls.
 - Shared fixtures in `tests/conftest.py`: `mock_hass`, `mock_auth_manager`, `mock_amazon_client`, `mock_ha_bridge`, `sync_engine`.
 - Helper factories: `make_alexa_item()` and `make_ha_item()` in `conftest.py`.
-- Tests are organized in classes (e.g., `TestInitialSyncMergeUnion`, `TestNormalizeName`).
-- Each test method is marked `@pytest.mark.asyncio` for async tests.
+- Many tests (especially sync engine tests) are organized in classes (e.g., `TestInitialSyncMergeUnion`, `TestNormalizeName`), but some files use module-level test functions.
+- Async tests are typically marked `@pytest.mark.asyncio`.
 - The `sync_engine` fixture patches `engine._store` to avoid file I/O.
 - Root-level `test_sync_logic.py` and `test_login_flow.py` are standalone scripts, **not** collected by pytest.
 
