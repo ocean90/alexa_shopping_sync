@@ -306,9 +306,8 @@ class AuthManager:
 
                 if resp.status_code != 200:
                     _LOGGER.warning(
-                        "Token exchange failed: status=%d body=%s",
+                        "Token exchange failed: status=%d",
                         resp.status_code,
-                        resp.text[:200],
                     )
                     return False
 
@@ -317,8 +316,7 @@ class AuthManager:
                     response_json = resp.json()
                 except Exception:
                     _LOGGER.warning(
-                        "Token exchange: failed to parse JSON response: %s",
-                        resp.text[:200],
+                        "Token exchange: failed to parse response as JSON",
                     )
                     return False
 

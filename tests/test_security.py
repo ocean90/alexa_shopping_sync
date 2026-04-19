@@ -149,68 +149,89 @@ class TestTokenExchangeLogging:
 
 
 # ---------------------------------------------------------------------------
-# 3. Proxy IP timeout uses .total_seconds()
+# 3. Proxy IP timeout uses .total_seconds() — exercise check_auth() directly
 # ---------------------------------------------------------------------------
 
 
+def _make_proxy_request(remote: str, flow_id: str | None = None) -> MagicMock:
+    """Build a minimal mocked aiohttp request for AlexaShoppingProxyView."""
+    request = MagicMock()
+    request.remote = remote
+    query = {"config_flow_id": flow_id} if flow_id else {}
+    request.url.query = query
+    # hass with a matching flow so flow_id validation passes
+    hass = MagicMock()
+    hass.config_entries.flow.async_progress.return_value = [{"flow_id": flow_id}] if flow_id else []
+    request.app = {"hass": hass}
+    return request
+
+
 class TestProxyIPTimeout:
-    """Verify that the IP timeout uses total_seconds, not .seconds."""
+    """Verify that check_auth() uses total_seconds, not .seconds."""
 
     @pytest.fixture(autouse=True)
-    def _reset_known_ips(self):
-        """Clear known_ips before each test."""
+    def _setup_view(self):
+        """Set up a proxy view with a mock handler and clear known_ips."""
         AlexaShoppingProxyView.known_ips.clear()
+        self._handler_called = False
+
+        async def fake_handler(request):
+            self._handler_called = True
+            return MagicMock()
+
+        AlexaShoppingProxyView.handler = fake_handler
+        self._wrapped = AlexaShoppingProxyView.check_auth()
         yield
         AlexaShoppingProxyView.known_ips.clear()
 
-    def test_expired_ip_requires_reauth(self):
-        """An IP whose whitelist entry is older than auth_seconds must re-authenticate."""
+    @pytest.mark.asyncio
+    async def test_expired_ip_requires_reauth(self):
+        """An IP whose whitelist entry expired must provide a valid flow_id again."""
+        from homeassistant.exceptions import Unauthorized
+
         remote = "192.168.1.100"
-        # Set the IP entry to 301 seconds ago (just over the 300s limit)
         AlexaShoppingProxyView.known_ips[remote] = datetime.datetime.now() - datetime.timedelta(
             seconds=301
         )
 
-        expired = (
-            remote not in AlexaShoppingProxyView.known_ips
-            or (datetime.datetime.now() - AlexaShoppingProxyView.known_ips[remote]).total_seconds()
-            > AlexaShoppingProxyView.auth_seconds
-        )
-        assert expired is True
+        # No flow_id in query → should raise Unauthorized
+        request = _make_proxy_request(remote)
+        with pytest.raises(Unauthorized):
+            await self._wrapped(request)
 
-    def test_fresh_ip_passes(self):
-        """An IP whose whitelist entry is recent should not require re-auth."""
+    @pytest.mark.asyncio
+    async def test_fresh_ip_passes(self):
+        """An IP whose whitelist entry is recent should pass without flow_id."""
         remote = "192.168.1.100"
         AlexaShoppingProxyView.known_ips[remote] = datetime.datetime.now() - datetime.timedelta(
             seconds=10
         )
 
-        expired = (
-            remote not in AlexaShoppingProxyView.known_ips
-            or (datetime.datetime.now() - AlexaShoppingProxyView.known_ips[remote]).total_seconds()
-            > AlexaShoppingProxyView.auth_seconds
-        )
-        assert expired is False
+        request = _make_proxy_request(remote)
+        await self._wrapped(request)
+        assert self._handler_called
 
-    def test_over_24h_still_expired(self):
+    @pytest.mark.asyncio
+    async def test_over_24h_still_expired(self):
         """Regression: .seconds wraps at 86400, .total_seconds() does not.
 
         With the old `.seconds` implementation, an IP whitelisted 86700 seconds
         ago (24h + 5min) would have .seconds = 300, passing the 300s check.
         With `.total_seconds()` it correctly returns 86700 > 300.
         """
+        from homeassistant.exceptions import Unauthorized
+
         remote = "192.168.1.100"
         AlexaShoppingProxyView.known_ips[remote] = datetime.datetime.now() - datetime.timedelta(
             seconds=86700
         )
 
-        # This is the key regression test: .seconds would give 300, passing the check
+        # Verify the wrap-around: .seconds would be ~300, but total_seconds is ~86700
         td = datetime.datetime.now() - AlexaShoppingProxyView.known_ips[remote]
-        assert td.seconds < 400  # .seconds wraps — would falsely pass the old check
-        assert td.total_seconds() > 86000  # .total_seconds() correctly reports >24h
+        assert td.seconds < 400  # would falsely pass old check
+        assert td.total_seconds() > 86000  # correctly reports >24h
 
-        expired = (
-            remote not in AlexaShoppingProxyView.known_ips
-            or td.total_seconds() > AlexaShoppingProxyView.auth_seconds
-        )
-        assert expired is True
+        # The real check_auth() should treat this as expired
+        request = _make_proxy_request(remote)
+        with pytest.raises(Unauthorized):
+            await self._wrapped(request)
