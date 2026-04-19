@@ -306,8 +306,10 @@ class AuthManager:
 
                 if resp.status_code != 200:
                     _LOGGER.warning(
-                        "Token exchange failed: status=%d",
+                        "Token exchange failed: status=%d url=%s domain=%s",
                         resp.status_code,
+                        resp.url,
+                        self._amazon_domain,
                     )
                     return False
 
@@ -316,7 +318,10 @@ class AuthManager:
                     response_json = resp.json()
                 except Exception:
                     _LOGGER.warning(
-                        "Token exchange: failed to parse response as JSON",
+                        "Token exchange: failed to parse response as JSON (status=%d, url=%s)",
+                        resp.status_code,
+                        resp.url,
+                        exc_info=True,
                     )
                     return False
 
@@ -632,7 +637,8 @@ async def async_register_device(
                     )
                 else:
                     _LOGGER.warning(
-                        "Device registration failed: status=%d",
+                        "Device registration (%s) failed: status=%d",
+                        domain,
                         resp.status_code,
                     )
         except Exception as err:
