@@ -700,7 +700,8 @@ class AlexaShoppingProxyView(HomeAssistantView):
 
             if (
                 remote not in cls.known_ips
-                or (datetime.datetime.now() - cls.known_ips[remote]).seconds > cls.auth_seconds
+                or (datetime.datetime.now() - cls.known_ips[remote]).total_seconds()
+                > cls.auth_seconds
             ):
                 try:
                     flow_id = request.url.query["config_flow_id"]

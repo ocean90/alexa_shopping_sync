@@ -306,9 +306,10 @@ class AuthManager:
 
                 if resp.status_code != 200:
                     _LOGGER.warning(
-                        "Token exchange failed: status=%d body=%s",
+                        "Token exchange failed: status=%d url=%s domain=%s",
                         resp.status_code,
-                        resp.text[:200],
+                        resp.url,
+                        self._amazon_domain,
                     )
                     return False
 
@@ -317,8 +318,10 @@ class AuthManager:
                     response_json = resp.json()
                 except Exception:
                     _LOGGER.warning(
-                        "Token exchange: failed to parse JSON response: %s",
-                        resp.text[:200],
+                        "Token exchange: failed to parse response as JSON (status=%d, url=%s)",
+                        resp.status_code,
+                        resp.url,
+                        exc_info=True,
                     )
                     return False
 
@@ -327,8 +330,10 @@ class AuthManager:
                 )
                 if not cookies_by_domain:
                     _LOGGER.warning(
-                        "Token exchange: no cookies in response: %s",
-                        str(response_json)[:200],
+                        "Token exchange: no cookies in response (keys: %s)",
+                        list(response_json.keys())
+                        if isinstance(response_json, dict)
+                        else type(response_json).__name__,
                     )
                     return False
 
@@ -626,15 +631,15 @@ async def async_register_device(
                         _LOGGER.debug("Device registration succeeded with %s", domain)
                         return refresh_token
                     _LOGGER.warning(
-                        "Device registration (%s): unexpected response: %s",
+                        "Device registration (%s): unexpected response structure (keys: %s)",
                         domain,
-                        str(data)[:300],
+                        list(data.keys()) if isinstance(data, dict) else type(data).__name__,
                     )
                 else:
                     _LOGGER.warning(
-                        "Device registration failed: status=%d body=%s",
+                        "Device registration (%s) failed: status=%d",
+                        domain,
                         resp.status_code,
-                        resp.text[:300],
                     )
         except Exception as err:
             _LOGGER.warning("Device registration (%s) exception: %s", domain, err)
