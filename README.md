@@ -22,7 +22,9 @@ A Home Assistant HACS custom integration for bidirectional synchronization betwe
 
 ### HACS (Recommended)
 
-1. Open HACS in Home Assistant
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=ocean90&repository=alexa_shopping_sync&category=integration)
+
+1. Click the badge above or open HACS in Home Assistant manually
 2. Go to **Integrations**
 3. Click the three dots menu → **Custom repositories**
 4. Add this repository URL and select **Integration** as category
