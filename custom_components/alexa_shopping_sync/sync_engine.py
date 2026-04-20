@@ -584,7 +584,10 @@ class SyncEngine:
                         ha_items_cache = await self._ha.async_get_items()
                     mapped_ha_ids = {m.ha_id for m in self._state.mappings}
                     ha_match = self._match_item_by_name(
-                        item.name, item.complete, ha_items_cache, mapped_ha_ids,
+                        item.name,
+                        item.complete,
+                        ha_items_cache,
+                        mapped_ha_ids,
                         strict_status=True,
                     )
                     if ha_match:
@@ -642,7 +645,10 @@ class SyncEngine:
                     ha_items_cache = await self._ha.async_get_items()
                 mapped_ha_ids = {m.ha_id for m in self._state.mappings}
                 ha_match = self._match_item_by_name(
-                    item.name, item.complete, ha_items_cache, mapped_ha_ids,
+                    item.name,
+                    item.complete,
+                    ha_items_cache,
+                    mapped_ha_ids,
                     strict_status=True,
                 )
                 if ha_match:
@@ -791,7 +797,10 @@ class SyncEngine:
                         alexa_snapshot = await self._amazon.async_get_snapshot()
                     mapped_alexa_ids = {m.alexa_id for m in self._state.mappings}
                     alexa_match = self._match_item_by_name(
-                        item.name, item.complete, alexa_snapshot, mapped_alexa_ids,
+                        item.name,
+                        item.complete,
+                        alexa_snapshot,
+                        mapped_alexa_ids,
                         strict_status=True,
                     )
                     if alexa_match:
@@ -838,7 +847,10 @@ class SyncEngine:
                     alexa_snapshot = await self._amazon.async_get_snapshot()
                 mapped_alexa_ids = {m.alexa_id for m in self._state.mappings}
                 alexa_match = self._match_item_by_name(
-                    item.name, item.complete, alexa_snapshot, mapped_alexa_ids,
+                    item.name,
+                    item.complete,
+                    alexa_snapshot,
+                    mapped_alexa_ids,
                     strict_status=True,
                 )
                 if alexa_match:
