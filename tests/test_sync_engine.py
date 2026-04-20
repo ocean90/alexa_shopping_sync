@@ -313,3 +313,194 @@ class TestDuplicateHandling:
         assert len(sync_engine.state.mappings) == 2
         assert result.alexa_to_ha_adds == 0
         assert result.ha_to_alexa_adds == 0
+
+
+class TestIncrementalDedup:
+    """Tests for dedup during incremental sync.
+
+    Prevents runaway duplication when two HA instances share the same
+    cloud-synced todo backend (e.g. Cookidoo) with separate Alexa accounts.
+    """
+
+    @pytest.mark.asyncio
+    async def test_alexa_to_ha_dedup_existing_ha_item(
+        self, sync_engine, mock_ha_bridge
+    ):
+        """New Alexa item should link to existing unmapped HA item instead of creating duplicate."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+
+        # HA already has "Zewa" (added via cloud sync from other instance)
+        existing_ha = make_ha_item("h1", "Zewa")
+        mock_ha_bridge.async_get_items.return_value = [existing_ha]
+
+        # New Alexa item appears
+        result = await sync_engine.async_sync_alexa_to_ha(
+            [make_alexa_item("a1", "Zewa")]
+        )
+
+        # Should create mapping, NOT add a duplicate
+        assert result.alexa_to_ha_adds == 0
+        assert len(sync_engine.state.mappings) == 1
+        assert sync_engine.state.mappings[0].alexa_id == "a1"
+        assert sync_engine.state.mappings[0].ha_id == "h1"
+        mock_ha_bridge.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ha_to_alexa_dedup_existing_alexa_item(
+        self, sync_engine, mock_amazon_client
+    ):
+        """New HA item should link to existing unmapped Alexa item instead of creating duplicate."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_ha_items = []
+
+        # Alexa already has "Zewa"
+        existing_alexa = make_alexa_item("a1", "Zewa")
+        mock_amazon_client.async_get_snapshot.return_value = [existing_alexa]
+
+        # New HA item appears (via cloud sync from other instance)
+        result = await sync_engine.async_sync_ha_to_alexa(
+            [make_ha_item("h1", "Zewa")]
+        )
+
+        # Should create mapping, NOT add a duplicate
+        assert result.ha_to_alexa_adds == 0
+        assert len(sync_engine.state.mappings) == 1
+        assert sync_engine.state.mappings[0].alexa_id == "a1"
+        assert sync_engine.state.mappings[0].ha_id == "h1"
+        mock_amazon_client.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_alexa_to_ha_dedup_warm_start(
+        self, sync_engine, mock_ha_bridge
+    ):
+        """Warm start: unmapped Alexa items should dedup against existing HA items."""
+        sync_engine._initial_sync_done = True
+        # _previous_alexa_items is empty (warm start after HA restart)
+        sync_engine._previous_alexa_items = []
+
+        alexa_item = make_alexa_item("a1", "Butter")
+        ha_item = make_ha_item("h1", "Butter")
+
+        # No mapping exists — simulates warm start with cloud-synced item
+        mock_ha_bridge.async_get_items.return_value = [ha_item]
+
+        result = await sync_engine.async_sync_alexa_to_ha([alexa_item])
+
+        assert result.alexa_to_ha_adds == 0
+        assert len(sync_engine.state.mappings) == 1
+        mock_ha_bridge.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ha_to_alexa_dedup_warm_start(
+        self, sync_engine, mock_amazon_client
+    ):
+        """Warm start: unmapped HA items should dedup against existing Alexa items."""
+        sync_engine._initial_sync_done = True
+        # _previous_ha_items is empty (warm start)
+        sync_engine._previous_ha_items = []
+
+        ha_item = make_ha_item("h1", "Butter")
+        alexa_item = make_alexa_item("a1", "Butter")
+
+        mock_amazon_client.async_get_snapshot.return_value = [alexa_item]
+
+        result = await sync_engine.async_sync_ha_to_alexa([ha_item])
+
+        assert result.ha_to_alexa_adds == 0
+        assert len(sync_engine.state.mappings) == 1
+        mock_amazon_client.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_dedup_skips_already_mapped_items(
+        self, sync_engine, mock_ha_bridge
+    ):
+        """Dedup should not link to an HA item that's already mapped to another Alexa item."""
+        sync_engine._initial_sync_done = True
+
+        # Existing mapping: a1 <-> h1 ("Zewa")
+        sync_engine._add_mapping("a1", "h1", "Zewa", ItemSource.ALEXA)
+        sync_engine._previous_alexa_items = [make_alexa_item("a1", "Zewa")]
+
+        # HA has only the already-mapped item
+        mock_ha_bridge.async_get_items.return_value = [make_ha_item("h1", "Zewa")]
+        mock_ha_bridge.async_add_item.return_value = make_ha_item("h2", "Zewa")
+
+        # Second "Zewa" appears in Alexa (legitimate duplicate)
+        new_items = [
+            make_alexa_item("a1", "Zewa"),
+            make_alexa_item("a2", "Zewa"),
+        ]
+
+        result = await sync_engine.async_sync_alexa_to_ha(new_items)
+
+        # Should add because h1 is already mapped — no unmapped match available
+        assert result.alexa_to_ha_adds == 1
+        mock_ha_bridge.async_add_item.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_dedup_does_not_match_completed_against_active(
+        self, sync_engine, mock_ha_bridge
+    ):
+        """Active item should NOT dedup against a completed item with same name.
+
+        Scenario: "Eier" is completed on HA, then a new active "Eier" is
+        added via Alexa.  The new item must be created, not linked to the
+        completed one.
+        """
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+
+        # HA has completed "Eier" (unmapped — arrived via cloud sync)
+        completed_ha = make_ha_item("h1", "Eier", complete=True)
+        mock_ha_bridge.async_get_items.return_value = [completed_ha]
+        mock_ha_bridge.async_add_item.return_value = make_ha_item("h2", "Eier", complete=False)
+
+        # New active "Eier" appears on Alexa
+        result = await sync_engine.async_sync_alexa_to_ha(
+            [make_alexa_item("a1", "Eier", complete=False)]
+        )
+
+        # Should add a NEW item, not link to the completed one
+        assert result.alexa_to_ha_adds == 1
+        mock_ha_bridge.async_add_item.assert_called_once_with("Eier", False)
+
+    @pytest.mark.asyncio
+    async def test_dedup_matches_same_status(
+        self, sync_engine, mock_ha_bridge
+    ):
+        """Active item SHOULD dedup against another active item with same name."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+
+        # HA has active "Eier" (unmapped — arrived via cloud sync)
+        active_ha = make_ha_item("h1", "Eier", complete=False)
+        mock_ha_bridge.async_get_items.return_value = [active_ha]
+
+        # New active "Eier" appears on Alexa
+        result = await sync_engine.async_sync_alexa_to_ha(
+            [make_alexa_item("a1", "Eier", complete=False)]
+        )
+
+        # Should create mapping, NOT add a duplicate
+        assert result.alexa_to_ha_adds == 0
+        assert len(sync_engine.state.mappings) == 1
+        mock_ha_bridge.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_dedup_case_insensitive(
+        self, sync_engine, mock_ha_bridge
+    ):
+        """Dedup should match case-insensitively."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+
+        mock_ha_bridge.async_get_items.return_value = [make_ha_item("h1", "zewa")]
+
+        result = await sync_engine.async_sync_alexa_to_ha(
+            [make_alexa_item("a1", "ZEWA")]
+        )
+
+        assert result.alexa_to_ha_adds == 0
+        assert len(sync_engine.state.mappings) == 1
+        mock_ha_bridge.async_add_item.assert_not_called()
