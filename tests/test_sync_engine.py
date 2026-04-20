@@ -470,6 +470,50 @@ class TestIncrementalDedup:
         mock_ha_bridge.async_add_item.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_ha_to_alexa_dedup_does_not_match_completed_against_active(
+        self, sync_engine, mock_amazon_client
+    ):
+        """HA→Alexa: active item should NOT dedup against completed Alexa item."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_ha_items = []
+
+        # Alexa has completed "Eier" (unmapped)
+        completed_alexa = make_alexa_item("a1", "Eier", complete=True)
+        mock_amazon_client.async_get_snapshot.return_value = [completed_alexa]
+        mock_amazon_client.async_add_item.return_value = make_alexa_item(
+            "a2", "Eier", complete=False
+        )
+
+        # New active "Eier" appears on HA
+        result = await sync_engine.async_sync_ha_to_alexa(
+            [make_ha_item("h1", "Eier", complete=False)]
+        )
+
+        # Should add a NEW item, not link to the completed one
+        assert result.ha_to_alexa_adds == 1
+        mock_amazon_client.async_add_item.assert_called_once_with("Eier", False)
+
+    @pytest.mark.asyncio
+    async def test_ha_to_alexa_dedup_matches_same_status(self, sync_engine, mock_amazon_client):
+        """HA→Alexa: active item SHOULD dedup against active Alexa item."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_ha_items = []
+
+        # Alexa has active "Eier" (unmapped)
+        active_alexa = make_alexa_item("a1", "Eier", complete=False)
+        mock_amazon_client.async_get_snapshot.return_value = [active_alexa]
+
+        # New active "Eier" appears on HA
+        result = await sync_engine.async_sync_ha_to_alexa(
+            [make_ha_item("h1", "Eier", complete=False)]
+        )
+
+        # Should create mapping, NOT add a duplicate
+        assert result.ha_to_alexa_adds == 0
+        assert len(sync_engine.state.mappings) == 1
+        mock_amazon_client.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
     async def test_dedup_case_insensitive(self, sync_engine, mock_ha_bridge):
         """Dedup should match case-insensitively."""
         sync_engine._initial_sync_done = True

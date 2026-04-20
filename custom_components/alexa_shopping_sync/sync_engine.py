@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -32,6 +32,8 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_ItemT = TypeVar("_ItemT", AlexaShoppingItem, HAShoppingItem)
 
 
 @dataclass
@@ -244,19 +246,28 @@ class SyncEngine:
         self,
         name: str,
         complete: bool,
-        candidates: list[AlexaShoppingItem] | list[HAShoppingItem],
+        candidates: list[_ItemT],
         exclude_ids: set[str] | None = None,
         strict_status: bool = False,
-    ) -> AlexaShoppingItem | HAShoppingItem | None:
-        """Match an item by normalized name + completion status.
+    ) -> _ItemT | None:
+        """Match a candidate item by normalized name.
 
-        Used during initial sync when IDs don't exist yet, and during
-        incremental dedup to avoid creating duplicates.
+        Matching rules depend on the flags:
 
-        When strict_status=True (used for incremental dedup), only items
-        with matching completion status are returned.  This prevents
-        linking a new active "Eier" to a completed "Eier" that is still
-        on the list.
+        - **strict_status=True** (incremental dedup): returns a candidate
+          only when both normalized name AND completion status match.
+          This prevents linking a new active "Eier" to a completed "Eier".
+
+        - **strict_status=False, preserve_duplicates=True** (default for
+          initial sync): first pass matches name + status; a second
+          fallback pass matches name only (handles items whose status
+          diverged between sides).
+
+        - **strict_status=False, preserve_duplicates=False**: returns the
+          first name match regardless of completion status (no fallback
+          needed).
+
+        Items whose ``item_id`` is in *exclude_ids* are skipped.
         """
         normalized = normalize_name(name)
         exclude = exclude_ids or set()
@@ -303,9 +314,7 @@ class SyncEngine:
         match = self._match_item_by_name(
             item.name, item.complete, ha_items_cache, mapped_ha_ids, strict_status=True
         )
-        if match is not None and not isinstance(match, HAShoppingItem):
-            return None, ha_items_cache
-        return match, ha_items_cache  # type: ignore[return-value]
+        return match, ha_items_cache
 
     async def _async_dedup_ha_item(
         self,
@@ -323,9 +332,7 @@ class SyncEngine:
         match = self._match_item_by_name(
             item.name, item.complete, alexa_snapshot, mapped_alexa_ids, strict_status=True
         )
-        if match is not None and not isinstance(match, AlexaShoppingItem):
-            return None, alexa_snapshot
-        return match, alexa_snapshot  # type: ignore[return-value]
+        return match, alexa_snapshot
 
     def _diff_alexa_snapshots(
         self,
@@ -435,7 +442,6 @@ class SyncEngine:
                 matched_ha_ids,
             )
             if match:
-                assert isinstance(match, HAShoppingItem)
                 self._add_mapping(
                     alexa_item.item_id,
                     match.item_id,
