@@ -287,6 +287,46 @@ class SyncEngine:
 
         return None
 
+    async def _async_dedup_alexa_item(
+        self,
+        item: AlexaShoppingItem,
+        ha_items_cache: list[HAShoppingItem] | None,
+        mapped_ha_ids: set[str],
+    ) -> tuple[HAShoppingItem | None, list[HAShoppingItem] | None]:
+        """Check if HA already has an unmapped item matching this Alexa item.
+
+        Returns (match, refreshed_cache).  When match is not None the
+        caller should create a mapping instead of adding a duplicate.
+        """
+        if ha_items_cache is None:
+            ha_items_cache = await self._ha.async_get_items()
+        match = self._match_item_by_name(
+            item.name, item.complete, ha_items_cache, mapped_ha_ids, strict_status=True
+        )
+        if match is not None and not isinstance(match, HAShoppingItem):
+            return None, ha_items_cache
+        return match, ha_items_cache  # type: ignore[return-value]
+
+    async def _async_dedup_ha_item(
+        self,
+        item: HAShoppingItem,
+        alexa_snapshot: list[AlexaShoppingItem] | None,
+        mapped_alexa_ids: set[str],
+    ) -> tuple[AlexaShoppingItem | None, list[AlexaShoppingItem] | None]:
+        """Check if Alexa already has an unmapped item matching this HA item.
+
+        Returns (match, refreshed_snapshot).  When match is not None the
+        caller should create a mapping instead of adding a duplicate.
+        """
+        if alexa_snapshot is None:
+            alexa_snapshot = await self._amazon.async_get_snapshot()
+        match = self._match_item_by_name(
+            item.name, item.complete, alexa_snapshot, mapped_alexa_ids, strict_status=True
+        )
+        if match is not None and not isinstance(match, AlexaShoppingItem):
+            return None, alexa_snapshot
+        return match, alexa_snapshot  # type: ignore[return-value]
+
     def _diff_alexa_snapshots(
         self,
         old: list[AlexaShoppingItem],
@@ -584,15 +624,8 @@ class SyncEngine:
                 if not self._mirror_completed and item.complete:
                     continue
                 try:
-                    # Dedup: check if HA already has an unmapped item with same name
-                    if ha_items_cache is None:
-                        ha_items_cache = await self._ha.async_get_items()
-                    ha_match = self._match_item_by_name(
-                        item.name,
-                        item.complete,
-                        ha_items_cache,
-                        mapped_ha_ids,
-                        strict_status=True,
+                    ha_match, ha_items_cache = await self._async_dedup_alexa_item(
+                        item, ha_items_cache, mapped_ha_ids
                     )
                     if ha_match:
                         self._add_mapping(
@@ -631,9 +664,9 @@ class SyncEngine:
                 result.skipped_echo += 1
                 # Still create mapping if not exists
                 if not self._find_mapping_by_alexa_id(item.item_id):
-                    # Find the HA item by name to create mapping
-                    ha_items = await self._ha.async_get_items()
-                    ha_match = self._match_item_by_name(item.name, item.complete, ha_items)
+                    ha_match, ha_items_cache = await self._async_dedup_alexa_item(
+                        item, ha_items_cache, mapped_ha_ids
+                    )
                     if ha_match:
                         self._add_mapping(
                             item.item_id,
@@ -648,15 +681,8 @@ class SyncEngine:
                 continue
 
             try:
-                # Dedup: check if HA already has an unmapped item with same name
-                if ha_items_cache is None:
-                    ha_items_cache = await self._ha.async_get_items()
-                ha_match = self._match_item_by_name(
-                    item.name,
-                    item.complete,
-                    ha_items_cache,
-                    mapped_ha_ids,
-                    strict_status=True,
+                ha_match, ha_items_cache = await self._async_dedup_alexa_item(
+                    item, ha_items_cache, mapped_ha_ids
                 )
                 if ha_match:
                     self._add_mapping(
@@ -802,18 +828,10 @@ class SyncEngine:
                 if not self._mirror_completed and item.complete:
                     continue
                 try:
-                    # Dedup: check if Alexa already has an unmapped item with same name
-                    if alexa_snapshot is None:
-                        alexa_snapshot = await self._amazon.async_get_snapshot()
-                    alexa_match = self._match_item_by_name(
-                        item.name,
-                        item.complete,
-                        alexa_snapshot,
-                        mapped_alexa_ids,
-                        strict_status=True,
+                    alexa_match, alexa_snapshot = await self._async_dedup_ha_item(
+                        item, alexa_snapshot, mapped_alexa_ids
                     )
                     if alexa_match:
-                        assert isinstance(alexa_match, AlexaShoppingItem)
                         self._add_mapping(
                             alexa_match.item_id, item.item_id, item.name, ItemSource.HA
                         )
@@ -854,18 +872,10 @@ class SyncEngine:
                 continue
 
             try:
-                # Dedup: check if Alexa already has an unmapped item with same name
-                if alexa_snapshot is None:
-                    alexa_snapshot = await self._amazon.async_get_snapshot()
-                alexa_match = self._match_item_by_name(
-                    item.name,
-                    item.complete,
-                    alexa_snapshot,
-                    mapped_alexa_ids,
-                    strict_status=True,
+                alexa_match, alexa_snapshot = await self._async_dedup_ha_item(
+                    item, alexa_snapshot, mapped_alexa_ids
                 )
                 if alexa_match:
-                    assert isinstance(alexa_match, AlexaShoppingItem)
                     self._add_mapping(
                         alexa_match.item_id,
                         item.item_id,
