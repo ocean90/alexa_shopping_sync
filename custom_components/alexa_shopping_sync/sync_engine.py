@@ -252,22 +252,23 @@ class SyncEngine:
     ) -> _ItemT | None:
         """Match a candidate item by normalized name.
 
-        Matching rules depend on the flags:
+        Matching rules depend on strict_status and the engine's
+        _preserve_duplicates setting:
 
-        - **strict_status=True** (incremental dedup): returns a candidate
-          only when both normalized name AND completion status match.
-          This prevents linking a new active "Eier" to a completed "Eier".
+        When strict_status is True (used for incremental dedup), only
+        candidates whose normalized name and completion status both match
+        are returned.  This prevents linking a new active "Eier" to a
+        completed "Eier" that is still on the list.
 
-        - **strict_status=False, preserve_duplicates=True** (default for
-          initial sync): first pass matches name + status; a second
-          fallback pass matches name only (handles items whose status
-          diverged between sides).
+        When strict_status is False and _preserve_duplicates is True
+        (the default for initial sync), a first pass matches by name and
+        status.  A second fallback pass matches by name only, covering
+        items whose status diverged between sides.
 
-        - **strict_status=False, preserve_duplicates=False**: returns the
-          first name match regardless of completion status (no fallback
-          needed).
+        When strict_status is False and _preserve_duplicates is False,
+        the first name match is returned regardless of completion status.
 
-        Items whose ``item_id`` is in *exclude_ids* are skipped.
+        Candidates whose item_id appears in exclude_ids are skipped.
         """
         normalized = normalize_name(name)
         exclude = exclude_ids or set()
