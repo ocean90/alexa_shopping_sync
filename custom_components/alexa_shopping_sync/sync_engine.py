@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, TypeVar
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.storage import Store
@@ -32,6 +32,8 @@ from .models import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+_ItemT = TypeVar("_ItemT", AlexaShoppingItem, HAShoppingItem)
 
 
 @dataclass
@@ -244,12 +246,29 @@ class SyncEngine:
         self,
         name: str,
         complete: bool,
-        candidates: list[AlexaShoppingItem] | list[HAShoppingItem],
+        candidates: list[_ItemT],
         exclude_ids: set[str] | None = None,
-    ) -> AlexaShoppingItem | HAShoppingItem | None:
-        """Match an item by normalized name + completion status.
+        strict_status: bool = False,
+    ) -> _ItemT | None:
+        """Match a candidate item by normalized name.
 
-        Used during initial sync when IDs don't exist yet.
+        Matching rules depend on strict_status and the engine's
+        _preserve_duplicates setting:
+
+        When strict_status is True (used for incremental dedup), only
+        candidates whose normalized name and completion status both match
+        are returned.  This prevents linking a new active "Eier" to a
+        completed "Eier" that is still on the list.
+
+        When strict_status is False and _preserve_duplicates is True
+        (the default for initial sync), a first pass matches by name and
+        status.  A second fallback pass matches by name only, covering
+        items whose status diverged between sides.
+
+        When strict_status is False and _preserve_duplicates is False,
+        the first name match is returned regardless of completion status.
+
+        Candidates whose item_id appears in exclude_ids are skipped.
         """
         normalized = normalize_name(name)
         exclude = exclude_ids or set()
@@ -258,11 +277,18 @@ class SyncEngine:
             if candidate.item_id in exclude:
                 continue
             if candidate.normalized_name == normalized:
-                if not self._preserve_duplicates:
+                if strict_status:
+                    # Dedup: only match when completion status also matches
+                    if candidate.complete == complete:
+                        return candidate
+                elif not self._preserve_duplicates:
                     return candidate
-                # With preserve_duplicates, also match on status
-                if candidate.complete == complete:
+                elif candidate.complete == complete:
+                    # With preserve_duplicates, also match on status
                     return candidate
+
+        if strict_status:
+            return None
 
         # Fallback: match just by name regardless of status
         for candidate in candidates:
@@ -272,6 +298,42 @@ class SyncEngine:
                 return candidate
 
         return None
+
+    async def _async_dedup_alexa_item(
+        self,
+        item: AlexaShoppingItem,
+        ha_items_cache: list[HAShoppingItem] | None,
+        mapped_ha_ids: set[str],
+    ) -> tuple[HAShoppingItem | None, list[HAShoppingItem] | None]:
+        """Check if HA already has an unmapped item matching this Alexa item.
+
+        Returns (match, refreshed_cache).  When match is not None the
+        caller should create a mapping instead of adding a duplicate.
+        """
+        if ha_items_cache is None:
+            ha_items_cache = await self._ha.async_get_items()
+        match = self._match_item_by_name(
+            item.name, item.complete, ha_items_cache, mapped_ha_ids, strict_status=True
+        )
+        return match, ha_items_cache
+
+    async def _async_dedup_ha_item(
+        self,
+        item: HAShoppingItem,
+        alexa_snapshot: list[AlexaShoppingItem] | None,
+        mapped_alexa_ids: set[str],
+    ) -> tuple[AlexaShoppingItem | None, list[AlexaShoppingItem] | None]:
+        """Check if Alexa already has an unmapped item matching this HA item.
+
+        Returns (match, refreshed_snapshot).  When match is not None the
+        caller should create a mapping instead of adding a duplicate.
+        """
+        if alexa_snapshot is None:
+            alexa_snapshot = await self._amazon.async_get_snapshot()
+        match = self._match_item_by_name(
+            item.name, item.complete, alexa_snapshot, mapped_alexa_ids, strict_status=True
+        )
+        return match, alexa_snapshot
 
     def _diff_alexa_snapshots(
         self,
@@ -381,7 +443,6 @@ class SyncEngine:
                 matched_ha_ids,
             )
             if match:
-                assert isinstance(match, HAShoppingItem)
                 self._add_mapping(
                     alexa_item.item_id,
                     match.item_id,
@@ -561,6 +622,8 @@ class SyncEngine:
             if not unmapped:
                 return result
             self._cleanup_expired_pending_ops()
+            ha_items_cache: list[HAShoppingItem] | None = None
+            mapped_ha_ids = {m.ha_id for m in self._state.mappings}
             for item in unmapped:
                 if self._is_echo(PendingOpType.ADD, item.name, item.item_id):
                     result.skipped_echo += 1
@@ -568,15 +631,31 @@ class SyncEngine:
                 if not self._mirror_completed and item.complete:
                     continue
                 try:
+                    ha_match, ha_items_cache = await self._async_dedup_alexa_item(
+                        item, ha_items_cache, mapped_ha_ids
+                    )
+                    if ha_match:
+                        self._add_mapping(
+                            item.item_id, ha_match.item_id, item.name, ItemSource.ALEXA
+                        )
+                        mapped_ha_ids.add(ha_match.item_id)
+                        _LOGGER.debug(
+                            "Warm start dedup: linked Alexa '%s' to existing HA item",
+                            item.name,
+                        )
+                        continue
+
                     ha_item = await self._ha.async_add_item(item.name, item.complete)
                     if ha_item:
                         self._add_mapping(
                             item.item_id, ha_item.item_id, item.name, ItemSource.ALEXA
                         )
+                        mapped_ha_ids.add(ha_item.item_id)
                         self.add_pending_op(
                             PendingOpType.ADD, ItemSource.ALEXA, item.name, ha_item.item_id
                         )
                         result.alexa_to_ha_adds += 1
+                        ha_items_cache = None  # invalidate cache after mutation
                 except Exception as err:
                     result.errors.append(f"Add to HA (warm start): {err}")
             return result
@@ -585,14 +664,16 @@ class SyncEngine:
         self._cleanup_expired_pending_ops()
 
         # Handle added items
+        ha_items_cache: list[HAShoppingItem] | None = None
+        mapped_ha_ids = {m.ha_id for m in self._state.mappings}
         for item in diff.added:
             if self._is_echo(PendingOpType.ADD, item.name, item.item_id):
                 result.skipped_echo += 1
                 # Still create mapping if not exists
                 if not self._find_mapping_by_alexa_id(item.item_id):
-                    # Find the HA item by name to create mapping
-                    ha_items = await self._ha.async_get_items()
-                    ha_match = self._match_item_by_name(item.name, item.complete, ha_items)
+                    ha_match, ha_items_cache = await self._async_dedup_alexa_item(
+                        item, ha_items_cache, mapped_ha_ids
+                    )
                     if ha_match:
                         self._add_mapping(
                             item.item_id,
@@ -600,12 +681,30 @@ class SyncEngine:
                             item.name,
                             ItemSource.HA,
                         )
+                        mapped_ha_ids.add(ha_match.item_id)
                 continue
 
             if not self._mirror_completed and item.complete:
                 continue
 
             try:
+                ha_match, ha_items_cache = await self._async_dedup_alexa_item(
+                    item, ha_items_cache, mapped_ha_ids
+                )
+                if ha_match:
+                    self._add_mapping(
+                        item.item_id,
+                        ha_match.item_id,
+                        item.name,
+                        ItemSource.ALEXA,
+                    )
+                    mapped_ha_ids.add(ha_match.item_id)
+                    _LOGGER.debug(
+                        "Incremental dedup: linked Alexa '%s' to existing HA item",
+                        item.name,
+                    )
+                    continue
+
                 ha_item = await self._ha.async_add_item(item.name, item.complete)
                 if ha_item:
                     self._add_mapping(
@@ -614,6 +713,7 @@ class SyncEngine:
                         item.name,
                         ItemSource.ALEXA,
                     )
+                    mapped_ha_ids.add(ha_item.item_id)
                     self.add_pending_op(
                         PendingOpType.ADD,
                         ItemSource.ALEXA,
@@ -621,6 +721,7 @@ class SyncEngine:
                         ha_item.item_id,
                     )
                     result.alexa_to_ha_adds += 1
+                    ha_items_cache = None  # invalidate cache after mutation
             except Exception as err:
                 result.errors.append(f"Add to HA: {err}")
 
@@ -725,6 +826,8 @@ class SyncEngine:
             if not unmapped:
                 return result
             self._cleanup_expired_pending_ops()
+            alexa_snapshot: list[AlexaShoppingItem] | None = None
+            mapped_alexa_ids = {m.alexa_id for m in self._state.mappings}
             for item in unmapped:
                 if self._is_echo(PendingOpType.ADD, item.name, item.item_id):
                     result.skipped_echo += 1
@@ -732,15 +835,31 @@ class SyncEngine:
                 if not self._mirror_completed and item.complete:
                     continue
                 try:
+                    alexa_match, alexa_snapshot = await self._async_dedup_ha_item(
+                        item, alexa_snapshot, mapped_alexa_ids
+                    )
+                    if alexa_match:
+                        self._add_mapping(
+                            alexa_match.item_id, item.item_id, item.name, ItemSource.HA
+                        )
+                        mapped_alexa_ids.add(alexa_match.item_id)
+                        _LOGGER.debug(
+                            "Warm start dedup: linked HA '%s' to existing Alexa item",
+                            item.name,
+                        )
+                        continue
+
                     alexa_item = await self._amazon.async_add_item(item.name, item.complete)
                     if alexa_item:
                         self._add_mapping(
                             alexa_item.item_id, item.item_id, item.name, ItemSource.HA
                         )
+                        mapped_alexa_ids.add(alexa_item.item_id)
                         self.add_pending_op(
                             PendingOpType.ADD, ItemSource.HA, item.name, alexa_item.item_id
                         )
                         result.ha_to_alexa_adds += 1
+                        alexa_snapshot = None  # invalidate cache after mutation
                 except Exception as err:
                     result.errors.append(f"Add to Alexa (warm start): {err}")
             return result
@@ -749,6 +868,8 @@ class SyncEngine:
         self._cleanup_expired_pending_ops()
 
         # Handle added items
+        alexa_snapshot: list[AlexaShoppingItem] | None = None
+        mapped_alexa_ids = {m.alexa_id for m in self._state.mappings}
         for item in diff.added:
             if self._is_echo(PendingOpType.ADD, item.name, item.item_id):
                 result.skipped_echo += 1
@@ -758,6 +879,23 @@ class SyncEngine:
                 continue
 
             try:
+                alexa_match, alexa_snapshot = await self._async_dedup_ha_item(
+                    item, alexa_snapshot, mapped_alexa_ids
+                )
+                if alexa_match:
+                    self._add_mapping(
+                        alexa_match.item_id,
+                        item.item_id,
+                        item.name,
+                        ItemSource.HA,
+                    )
+                    mapped_alexa_ids.add(alexa_match.item_id)
+                    _LOGGER.debug(
+                        "Incremental dedup: linked HA '%s' to existing Alexa item",
+                        item.name,
+                    )
+                    continue
+
                 alexa_item = await self._amazon.async_add_item(item.name, item.complete)
                 if alexa_item:
                     self._add_mapping(
@@ -766,6 +904,7 @@ class SyncEngine:
                         item.name,
                         ItemSource.HA,
                     )
+                    mapped_alexa_ids.add(alexa_item.item_id)
                     self.add_pending_op(
                         PendingOpType.ADD,
                         ItemSource.HA,
@@ -773,6 +912,7 @@ class SyncEngine:
                         alexa_item.item_id,
                     )
                     result.ha_to_alexa_adds += 1
+                    alexa_snapshot = None  # invalidate cache after mutation
             except Exception as err:
                 result.errors.append(f"Add to Alexa: {err}")
 
