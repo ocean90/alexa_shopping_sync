@@ -66,8 +66,8 @@ A Home Assistant HACS custom integration for bidirectional synchronization betwe
 4. Complete the Amazon login in the browser window
 5. **Choose a target list**: The built-in Shopping List or any available to-do list entity
 6. Configure sync options:
-   - **Sync Mode**: Two-way, Alexa→HA, or HA→Alexa
-   - **Initial Sync Mode**: Merge (union), Alexa wins, or HA wins
+   - **Sync Mode**: Two-way, Alexa→HA, HA→Alexa, or Move (Alexa→HA + delete from Alexa)
+   - **Initial Sync Mode**: Merge (union), Alexa wins, or HA wins (skipped for Move mode)
    - **Poll Interval**: 30-600 seconds (default: 60)
 
 The target list can be changed later in the integration options. Changing it will clear all item mappings and trigger a full resync.
@@ -79,8 +79,11 @@ The target list can be changed later in the integration options. Changing it wil
 | **Two-way** | Changes sync in both directions |
 | **Alexa → HA** | Only Alexa changes appear in HA |
 | **HA → Alexa** | Only HA changes appear in Alexa |
+| **Move (Alexa → HA, delete from Alexa)** | Each poll cycle copies every Alexa item into the HA list and then deletes it from Alexa. Alexa acts as an inbox that is drained into HA; HA changes are not mirrored back. Useful when you dictate items to Alexa but want the canonical list to live in HA only. |
 
 ### Initial Sync
+
+Applied once on first sync. Has no effect afterwards, and is not asked in **Move** mode.
 
 | Mode | Description |
 |---|---|
