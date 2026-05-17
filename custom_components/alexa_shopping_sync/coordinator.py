@@ -444,16 +444,20 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Pause the cycle when the HA target list is gone — surfacing a
             # repair issue gives the user actionable feedback instead of a
             # cryptic ServiceValidationError every poll. Returning a normal
-            # data dict avoids the UpdateFailed log spam. The outage signal
-            # is carried via _last_error (exposed by the Last Error sensor)
-            # plus the repair issue itself; no extra dict key needed.
+            # data dict avoids the UpdateFailed log spam.
+            #
+            # _connected is flipped to False so the connection binary_sensor
+            # reflects the paused state: from the user's perspective the
+            # integration isn't operational even though Amazon is reachable.
+            # The next successful poll after recovery will restore it.
             if not await self._async_target_list_available():
+                self._connected = False
                 self._last_error = f"Target list {self._target_list} is unavailable"
                 return {
                     "alexa_items": self._alexa_item_count,
                     "ha_items": self._ha_item_count,
                     "last_sync": self._last_success,
-                    "connected": self._connected,
+                    "connected": False,
                 }
 
             # Allow one silent re-auth retry within the same update cycle.

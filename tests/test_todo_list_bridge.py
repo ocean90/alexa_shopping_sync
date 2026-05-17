@@ -48,6 +48,13 @@ async def test_validate_unavailable_state_treated_as_missing(bridge, mock_hass):
 
 
 @pytest.mark.asyncio
+async def test_validate_unknown_state_treated_as_missing(bridge, mock_hass):
+    """An entity still initialising (state='unknown') is not yet usable."""
+    mock_hass.states.get.return_value = MagicMock(state="unknown")
+    assert await bridge.async_validate_available() is False
+
+
+@pytest.mark.asyncio
 async def test_get_items(bridge, mock_hass):
     """Test fetching items from todo entity."""
     mock_hass.services.async_call.return_value = {
