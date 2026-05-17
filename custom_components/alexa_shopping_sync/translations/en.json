@@ -100,6 +100,10 @@
       "title": "Alexa Shopping Sync: Shopping List not found",
       "description": "The Home Assistant Shopping List integration is not configured. Please add it for sync to work."
     },
+    "target_list_missing": {
+      "title": "Alexa Shopping Sync: Target list not found",
+      "description": "The configured target to-do entity ({entity_id}) is not available. Make sure the integration providing it is configured and running — Alexa Shopping List Sync will retry automatically as soon as the entity appears."
+    },
     "passkey_detected": {
       "title": "Alexa Shopping Sync: Passkey login not supported",
       "description": "Amazon is requiring a Passkey for login. This integration only supports Authenticator App 2SV. Please disable Passkeys in your Amazon account settings."
