@@ -138,12 +138,14 @@ async def test_target_present_proceeds_and_clears_stale_issue():
 
     assert result is True
     create_issue.assert_not_called()
-    # Both stale issues for THIS entry should be cleared on a successful setup,
-    # using per-entry IDs so other entries' issues aren't affected.
+    # Per-entry IDs for the current scheme plus the legacy global IDs (which
+    # 0.5.0 may have created) are all cleared on a successful setup.
     delete_keys = {call.args[2] for call in delete_issue.call_args_list}
     assert delete_keys == {
         "target_list_missing_entry-abc",
         "shopping_list_missing_entry-abc",
+        "target_list_missing",
+        "shopping_list_missing",
     }
 
 

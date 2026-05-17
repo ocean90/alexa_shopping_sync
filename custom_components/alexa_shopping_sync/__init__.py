@@ -84,6 +84,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry
 
     ir.async_delete_issue(hass, DOMAIN, target_list_issue_id)
     ir.async_delete_issue(hass, DOMAIN, shopping_list_issue_id)
+    # Clean up legacy non-suffixed issue IDs that may have been created by
+    # 0.5.0 and earlier. Safe no-op when no such issue exists.
+    ir.async_delete_issue(hass, DOMAIN, "target_list_missing")
+    ir.async_delete_issue(hass, DOMAIN, "shopping_list_missing")
 
     coordinator = AlexaShoppingCoordinator(hass, entry)
     await coordinator.async_initialize()
