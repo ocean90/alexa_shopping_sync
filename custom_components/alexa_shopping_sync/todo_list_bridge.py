@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 
 from .models import HAShoppingItem
@@ -44,9 +45,18 @@ class TodoListBridge:
         )
 
     async def async_validate_available(self) -> bool:
-        """Check if the todo entity exists."""
+        """Check if the todo entity exists and is reachable.
+
+        Returns False when the entity is gone from the state registry OR
+        present but reporting ``unavailable``/``unknown`` (e.g. providing
+        integration disabled, or still initialising). Any of these would
+        otherwise blow up later inside the todo service call with a
+        ``ServiceValidationError``.
+        """
         state = self._hass.states.get(self._entity_id)
-        return state is not None
+        if state is None:
+            return False
+        return state.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN)
 
     async def async_get_items(self) -> list[HAShoppingItem]:
         """Get all items from the todo entity."""

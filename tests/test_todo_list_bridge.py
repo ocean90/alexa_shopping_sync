@@ -36,6 +36,25 @@ async def test_validate_available(bridge, mock_hass):
 
 
 @pytest.mark.asyncio
+async def test_validate_unavailable_state_treated_as_missing(bridge, mock_hass):
+    """An entity in 'unavailable' state must not pass the pre-flight check.
+
+    A disabled providing integration leaves the state entry behind but with
+    state='unavailable'; calling the todo service against it fails with
+    'Referenced entities ... are missing or not currently available'.
+    """
+    mock_hass.states.get.return_value = MagicMock(state="unavailable")
+    assert await bridge.async_validate_available() is False
+
+
+@pytest.mark.asyncio
+async def test_validate_unknown_state_treated_as_missing(bridge, mock_hass):
+    """An entity still initialising (state='unknown') is not yet usable."""
+    mock_hass.states.get.return_value = MagicMock(state="unknown")
+    assert await bridge.async_validate_available() is False
+
+
+@pytest.mark.asyncio
 async def test_get_items(bridge, mock_hass):
     """Test fetching items from todo entity."""
     mock_hass.services.async_call.return_value = {

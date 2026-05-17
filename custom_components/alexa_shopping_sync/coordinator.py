@@ -83,6 +83,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self._silent_refresh_tried = False
         self._sync_enabled = entry.data.get("_sync_enabled", True)
         self._force_once = False
+        self._target_list_unavailable_logged = False
 
         poll_interval = entry.options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
         poll_interval = max(poll_interval, MIN_POLL_INTERVAL)
@@ -231,6 +232,66 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # optimistically mark authenticated; first poll will verify.
             self._auth_manager.mark_authenticated()
 
+    def _target_missing_issue(self) -> tuple[str, str, dict[str, str] | None]:
+        """Return (issue_id, translation_key, placeholders) for the current target.
+
+        Mirrors the two-branch wording in ``async_setup_entry`` so the user
+        sees the correct repair message for the built-in shopping list vs.
+        an arbitrary todo entity.
+        """
+        if self._target_list == TARGET_SHOPPING_LIST:
+            return (
+                f"shopping_list_missing_{self._entry.entry_id}",
+                "shopping_list_missing",
+                None,
+            )
+        return (
+            f"target_list_missing_{self._entry.entry_id}",
+            "target_list_missing",
+            {"entity_id": self._target_list},
+        )
+
+    async def _async_target_list_available(self) -> bool:
+        """Pre-flight check before any sync that touches the HA list.
+
+        Mirrors the setup-time check in ``async_setup_entry`` so a target
+        list that disappears at runtime (integration disabled, entity
+        removed) surfaces the same repair issue instead of leaking a
+        cryptic ServiceValidationError into the logs every poll cycle.
+
+        - First failure: log a warning, register the repair issue.
+        - Subsequent failures: silent — the issue stays visible.
+        - Recovery: clear the issue and reset the log gate.
+        """
+        if not self._ha_bridge:
+            return False
+
+        issue_id, translation_key, placeholders = self._target_missing_issue()
+        available = await self._ha_bridge.async_validate_available()
+
+        if not available:
+            if not self._target_list_unavailable_logged:
+                _LOGGER.warning(
+                    "Target list %s is unavailable — sync paused until it returns",
+                    self._target_list,
+                )
+                self._target_list_unavailable_logged = True
+            create_kwargs: dict[str, Any] = {
+                "is_fixable": False,
+                "severity": ir.IssueSeverity.ERROR,
+                "translation_key": translation_key,
+            }
+            if placeholders is not None:
+                create_kwargs["translation_placeholders"] = placeholders
+            ir.async_create_issue(self.hass, DOMAIN, issue_id, **create_kwargs)
+            return False
+
+        if self._target_list_unavailable_logged:
+            _LOGGER.info("Target list %s is available again — resuming sync", self._target_list)
+            self._target_list_unavailable_logged = False
+        ir.async_delete_issue(self.hass, DOMAIN, issue_id)
+        return True
+
     @callback
     def async_start_event_listener(self) -> None:
         """Start listening for HA list change events."""
@@ -295,6 +356,9 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not self._auth_manager or not self._auth_manager.authenticated:
             _LOGGER.debug("Skipping HA->Alexa sync: not authenticated")
+            return
+
+        if not await self._async_target_list_available():
             return
 
         try:
@@ -376,6 +440,25 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 else:
                     self._trigger_reauth()
                     raise UpdateFailed("Not authenticated - reauth required")
+
+            # Pause the cycle when the HA target list is gone — surfacing a
+            # repair issue gives the user actionable feedback instead of a
+            # cryptic ServiceValidationError every poll. Returning a normal
+            # data dict avoids the UpdateFailed log spam.
+            #
+            # _connected is flipped to False so the connection binary_sensor
+            # reflects the paused state: from the user's perspective the
+            # integration isn't operational even though Amazon is reachable.
+            # The next successful poll after recovery will restore it.
+            if not await self._async_target_list_available():
+                self._connected = False
+                self._last_error = f"Target list {self._target_list} is unavailable"
+                return {
+                    "alexa_items": self._alexa_item_count,
+                    "ha_items": self._ha_item_count,
+                    "last_sync": self._last_success,
+                    "connected": False,
+                }
 
             # Allow one silent re-auth retry within the same update cycle.
             # Without this, a successful silent refresh would still raise
