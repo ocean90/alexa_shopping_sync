@@ -150,8 +150,13 @@ async def test_target_check_without_bridge_returns_false():
 
 
 @pytest.mark.asyncio
-async def test_shopping_list_target_uses_bridge_validation():
-    """The built-in shopping list target reaches the same validation path."""
+async def test_shopping_list_target_uses_shopping_list_missing_issue():
+    """Built-in shopping list uses the shopping_list_missing key and ID.
+
+    Same wording the user already sees from the setup-time check — otherwise
+    the runtime message would (incorrectly) refer to a "to-do entity" for
+    the built-in list.
+    """
     coord = _make_coordinator()
     coord._target_list = TARGET_SHOPPING_LIST
     coord._entry.data = {**coord._entry.data, CONF_TARGET_LIST: TARGET_SHOPPING_LIST}
@@ -166,3 +171,9 @@ async def test_shopping_list_target_uses_bridge_validation():
         assert await coord._async_target_list_available() is False
 
     create_issue.assert_called_once()
+    args, kwargs = create_issue.call_args
+    # Positional: hass, DOMAIN, issue_id
+    assert args[2] == f"shopping_list_missing_{ENTRY_ID}"
+    assert kwargs["translation_key"] == "shopping_list_missing"
+    # shopping_list_missing has no placeholders — must not be passed
+    assert "translation_placeholders" not in kwargs

@@ -232,6 +232,25 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # optimistically mark authenticated; first poll will verify.
             self._auth_manager.mark_authenticated()
 
+    def _target_missing_issue(self) -> tuple[str, str, dict[str, str] | None]:
+        """Return (issue_id, translation_key, placeholders) for the current target.
+
+        Mirrors the two-branch wording in ``async_setup_entry`` so the user
+        sees the correct repair message for the built-in shopping list vs.
+        an arbitrary todo entity.
+        """
+        if self._target_list == TARGET_SHOPPING_LIST:
+            return (
+                f"shopping_list_missing_{self._entry.entry_id}",
+                "shopping_list_missing",
+                None,
+            )
+        return (
+            f"target_list_missing_{self._entry.entry_id}",
+            "target_list_missing",
+            {"entity_id": self._target_list},
+        )
+
     async def _async_target_list_available(self) -> bool:
         """Pre-flight check before any sync that touches the HA list.
 
@@ -247,7 +266,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not self._ha_bridge:
             return False
 
-        issue_id = f"target_list_missing_{self._entry.entry_id}"
+        issue_id, translation_key, placeholders = self._target_missing_issue()
         available = await self._ha_bridge.async_validate_available()
 
         if not available:
@@ -257,15 +276,14 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     self._target_list,
                 )
                 self._target_list_unavailable_logged = True
-            ir.async_create_issue(
-                self.hass,
-                DOMAIN,
-                issue_id,
-                is_fixable=False,
-                severity=ir.IssueSeverity.ERROR,
-                translation_key="target_list_missing",
-                translation_placeholders={"entity_id": self._target_list},
-            )
+            create_kwargs: dict[str, Any] = {
+                "is_fixable": False,
+                "severity": ir.IssueSeverity.ERROR,
+                "translation_key": translation_key,
+            }
+            if placeholders is not None:
+                create_kwargs["translation_placeholders"] = placeholders
+            ir.async_create_issue(self.hass, DOMAIN, issue_id, **create_kwargs)
             return False
 
         if self._target_list_unavailable_logged:
@@ -426,7 +444,9 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # Pause the cycle when the HA target list is gone — surfacing a
             # repair issue gives the user actionable feedback instead of a
             # cryptic ServiceValidationError every poll. Returning a normal
-            # data dict avoids the UpdateFailed log spam.
+            # data dict avoids the UpdateFailed log spam. The outage signal
+            # is carried via _last_error (exposed by the Last Error sensor)
+            # plus the repair issue itself; no extra dict key needed.
             if not await self._async_target_list_available():
                 self._last_error = f"Target list {self._target_list} is unavailable"
                 return {
@@ -434,7 +454,6 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "ha_items": self._ha_item_count,
                     "last_sync": self._last_success,
                     "connected": self._connected,
-                    "target_list_available": False,
                 }
 
             # Allow one silent re-auth retry within the same update cycle.
