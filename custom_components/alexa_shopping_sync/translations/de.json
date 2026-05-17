@@ -112,7 +112,7 @@
         },
         "data_description": {
           "target_list": "Das Ändern der Ziel-Liste löscht alle Zuordnungen und löst einen vollständigen Resync aus.",
-          "sync_mode": "Richtung der Synchronisation. „Verschieben" leert Alexa in jedem Zyklus in HA — HA-Änderungen werden nicht zurück gespiegelt."
+          "sync_mode": "Richtung der Synchronisation. „Verschieben“ leert Alexa in jedem Zyklus in HA — HA-Änderungen werden nicht zurück gespiegelt."
         }
       }
     },
