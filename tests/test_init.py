@@ -12,8 +12,9 @@ from custom_components.alexa_shopping_sync import async_setup_entry
 from custom_components.alexa_shopping_sync.const import CONF_TARGET_LIST
 
 
-def _make_entry(target_list: str) -> MagicMock:
+def _make_entry(target_list: str, entry_id: str = "entry-abc") -> MagicMock:
     entry = MagicMock()
+    entry.entry_id = entry_id
     entry.data = {CONF_TARGET_LIST: target_list}
     entry.runtime_data = None
     entry.async_on_unload = MagicMock()
@@ -62,7 +63,9 @@ async def test_target_missing_after_startup_creates_issue_and_raises_not_ready()
 
     create_issue.assert_called_once()
     args, kwargs = create_issue.call_args
-    assert args[2] == "target_list_missing"
+    # Issue ID is scoped per entry so multi-instance setups don't collide.
+    assert args[2] == "target_list_missing_entry-abc"
+    assert kwargs["translation_key"] == "target_list_missing"
     assert kwargs["translation_placeholders"] == {"entity_id": "todo.cookidoo_extras"}
     delete_issue.assert_not_called()
 
@@ -94,6 +97,33 @@ async def test_target_present_proceeds_and_clears_stale_issue():
 
     assert result is True
     create_issue.assert_not_called()
-    # Both stale issues should be cleared on a successful setup.
+    # Both stale issues for THIS entry should be cleared on a successful setup,
+    # using per-entry IDs so other entries' issues aren't affected.
     delete_keys = {call.args[2] for call in delete_issue.call_args_list}
-    assert delete_keys == {"target_list_missing", "shopping_list_missing"}
+    assert delete_keys == {
+        "target_list_missing_entry-abc",
+        "shopping_list_missing_entry-abc",
+    }
+
+
+@pytest.mark.asyncio
+async def test_multiple_entries_use_distinct_issue_ids():
+    """A second entry with a different target must not clear the first's issue."""
+    hass = _make_hass(CoreState.running, states={})
+    entry_a = _make_entry("todo.cookidoo_extras", entry_id="entry-a")
+    entry_b = _make_entry("todo.bring_list", entry_id="entry-b")
+
+    with (
+        patch("custom_components.alexa_shopping_sync.ir.async_create_issue") as create_issue,
+        patch("custom_components.alexa_shopping_sync.ir.async_delete_issue"),
+    ):
+        with pytest.raises(ConfigEntryNotReady):
+            await async_setup_entry(hass, entry_a)
+        with pytest.raises(ConfigEntryNotReady):
+            await async_setup_entry(hass, entry_b)
+
+    created_ids = [call.args[2] for call in create_issue.call_args_list]
+    assert created_ids == [
+        "target_list_missing_entry-a",
+        "target_list_missing_entry-b",
+    ]

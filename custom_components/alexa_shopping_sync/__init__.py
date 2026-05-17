@@ -27,6 +27,11 @@ AlexaShoppingConfigEntry = ConfigEntry[AlexaShoppingCoordinator]
 
 async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry) -> bool:
     """Set up Alexa Shopping List Sync from a config entry."""
+    # Scope issue IDs to the entry so multi-instance setups don't overwrite or
+    # clear each other's issues (each entry can target a different list).
+    shopping_list_issue_id = f"shopping_list_missing_{entry.entry_id}"
+    target_list_issue_id = f"target_list_missing_{entry.entry_id}"
+
     # Validate the target list is available
     target_list = entry.data.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST)
     if target_list == TARGET_SHOPPING_LIST:
@@ -34,7 +39,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry
             ir.async_create_issue(
                 hass,
                 DOMAIN,
-                "shopping_list_missing",
+                shopping_list_issue_id,
                 is_fixable=False,
                 severity=ir.IssueSeverity.ERROR,
                 translation_key="shopping_list_missing",
@@ -56,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry
                 ir.async_create_issue(
                     hass,
                     DOMAIN,
-                    "target_list_missing",
+                    target_list_issue_id,
                     is_fixable=False,
                     severity=ir.IssueSeverity.ERROR,
                     translation_key="target_list_missing",
@@ -69,8 +74,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry
                 )
             raise ConfigEntryNotReady(f"Target todo entity {target_list} not yet available")
 
-    ir.async_delete_issue(hass, DOMAIN, "target_list_missing")
-    ir.async_delete_issue(hass, DOMAIN, "shopping_list_missing")
+    ir.async_delete_issue(hass, DOMAIN, target_list_issue_id)
+    ir.async_delete_issue(hass, DOMAIN, shopping_list_issue_id)
 
     coordinator = AlexaShoppingCoordinator(hass, entry)
     await coordinator.async_initialize()
