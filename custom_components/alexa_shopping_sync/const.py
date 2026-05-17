@@ -111,6 +111,7 @@ class SyncMode(StrEnum):
     TWO_WAY = "two_way"
     ALEXA_TO_HA = "alexa_to_ha"
     HA_TO_ALEXA = "ha_to_alexa"
+    MOVE_ALEXA_TO_HA = "move_alexa_to_ha"
 
 
 class InitialSyncMode(StrEnum):

@@ -55,6 +55,7 @@ class SyncResult:
     ha_to_alexa_adds: int = 0
     ha_to_alexa_updates: int = 0
     ha_to_alexa_deletes: int = 0
+    move_deletes: int = 0
     errors: list[str] = field(default_factory=list)
     skipped_echo: int = 0
 
@@ -405,10 +406,13 @@ class SyncEngine:
         merge_union = union of both lists (default, safest).
         alexa_wins = HA is overwritten with Alexa items.
         ha_wins = Alexa is overwritten with HA items.
+        move_alexa_to_ha = drain Alexa into HA (initial_sync_mode is ignored).
         """
         result = SyncResult()
 
-        if self._initial_sync_mode == InitialSyncMode.MERGE_UNION:
+        if self._sync_mode == SyncMode.MOVE_ALEXA_TO_HA:
+            result = await self._async_drain_alexa(alexa_items, list(ha_items))
+        elif self._initial_sync_mode == InitialSyncMode.MERGE_UNION:
             result = await self._async_initial_merge_union(alexa_items, ha_items)
         elif self._initial_sync_mode == InitialSyncMode.ALEXA_WINS:
             result = await self._async_initial_alexa_wins(alexa_items, ha_items)
@@ -549,6 +553,74 @@ class SyncEngine:
 
         return result
 
+    async def _async_drain_alexa(
+        self,
+        alexa_items: list[AlexaShoppingItem],
+        ha_items_cache: list[HAShoppingItem] | None = None,
+    ) -> SyncResult:
+        """Move items from Alexa to HA, then delete from Alexa.
+
+        Used by MOVE_ALEXA_TO_HA mode for both initial and incremental cycles
+        — every cycle drains everything currently visible on Alexa.
+
+        Per-item flow:
+        1. Dedup against current HA snapshot (excluding HA items already
+           claimed within this cycle). If a match exists, no HA add.
+        2. Else add the item to HA.
+        3. Delete the Alexa item. On failure, item is retried next cycle —
+           dedup ensures no HA duplicate is created in the meantime.
+
+        Move mode ignores ``mirror_completed``: a true "drain" must remove
+        every item — including completed ones — or the Alexa list would
+        accumulate completed items forever. Completed items are copied to
+        HA with their status preserved, matching the user-facing promise
+        of the mode label ("Move (Alexa → HA, delete from Alexa)").
+        """
+        result = SyncResult()
+        if ha_items_cache is None:
+            ha_items_cache = await self._ha.async_get_items()
+
+        # Track HA items consumed within this cycle so two Alexa duplicates
+        # don't both dedup to the same HA target.
+        used_ha_ids: set[str] = set()
+
+        for item in alexa_items:
+            ha_add_ok = True
+            try:
+                existing = self._match_item_by_name(
+                    item.name,
+                    item.complete,
+                    ha_items_cache,
+                    used_ha_ids,
+                    strict_status=True,
+                )
+                if existing is None:
+                    ha_item = await self._ha.async_add_item(item.name, item.complete)
+                    if ha_item:
+                        ha_items_cache.append(ha_item)
+                        used_ha_ids.add(ha_item.item_id)
+                        result.alexa_to_ha_adds += 1
+                    else:
+                        ha_add_ok = False
+                else:
+                    used_ha_ids.add(existing.item_id)
+            except Exception as err:
+                ha_add_ok = False
+                result.errors.append(f"Move to HA: {err}")
+
+            if not ha_add_ok:
+                # Leave Alexa item intact — will be retried next cycle.
+                continue
+
+            try:
+                success = await self._amazon.async_delete_item(item.item_id)
+                if success:
+                    result.move_deletes += 1
+            except Exception as err:
+                result.errors.append(f"Move delete from Alexa: {err}")
+
+        return result
+
     async def _async_initial_ha_wins(
         self,
         alexa_items: list[AlexaShoppingItem],
@@ -597,8 +669,16 @@ class SyncEngine:
         if not self._initial_sync_done:
             ha_items = await self._ha.async_get_items()
             result = await self.async_initial_sync(alexa_items, ha_items)
-            self._previous_alexa_items = alexa_items
+            # MOVE mode doesn't diff between cycles — every poll drains everything.
+            self._previous_alexa_items = (
+                [] if self._sync_mode == SyncMode.MOVE_ALEXA_TO_HA else alexa_items
+            )
             self._previous_ha_items = ha_items
+            return result
+
+        if self._sync_mode == SyncMode.MOVE_ALEXA_TO_HA:
+            result = await self._async_drain_alexa(alexa_items)
+            self._previous_alexa_items = []
             return result
 
         if self._sync_mode == SyncMode.HA_TO_ALEXA:
@@ -809,7 +889,7 @@ class SyncEngine:
             self._previous_ha_items = ha_items
             return result
 
-        if self._sync_mode == SyncMode.ALEXA_TO_HA:
+        if self._sync_mode in (SyncMode.ALEXA_TO_HA, SyncMode.MOVE_ALEXA_TO_HA):
             self._previous_ha_items = ha_items
             return result
 

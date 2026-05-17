@@ -37,7 +37,6 @@
         "title": "Sync-Optionen",
         "data": {
           "sync_mode": "Sync-Modus",
-          "initial_sync_mode": "Initialer Sync-Modus",
           "poll_interval": "Abfrage-Intervall (Sekunden)",
           "preserve_duplicates": "Duplikate beibehalten",
           "mirror_completed": "Erledigte Einträge synchronisieren",
@@ -45,8 +44,17 @@
         },
         "data_description": {
           "sync_mode": "Richtung der Synchronisation",
-          "initial_sync_mode": "Wie bestehende Einträge beim ersten Sync behandelt werden",
           "poll_interval": "Wie oft auf Änderungen geprüft wird (30-600 Sekunden)"
+        }
+      },
+      "initial_sync": {
+        "title": "Initiale Sync-Strategie",
+        "description": "Wie sollen bestehende Einträge beim ersten Sync zusammengeführt werden?",
+        "data": {
+          "initial_sync_mode": "Initialer Sync-Modus"
+        },
+        "data_description": {
+          "initial_sync_mode": "Wird einmalig beim ersten Sync angewendet — danach ohne Wirkung."
         }
       },
       "reauth_confirm": {
@@ -86,8 +94,26 @@
           "debug_mode": "Debug-Logging aktivieren"
         },
         "data_description": {
-          "target_list": "Das Ändern der Ziel-Liste löscht alle Zuordnungen und löst einen vollständigen Resync aus."
+          "target_list": "Das Ändern der Ziel-Liste löscht alle Zuordnungen und löst einen vollständigen Resync aus.",
+          "sync_mode": "Richtung der Synchronisation. „Verschieben“ leert Alexa in jedem Zyklus in HA — HA-Änderungen werden nicht zurück gespiegelt."
         }
+      }
+    }
+  },
+  "selector": {
+    "sync_mode": {
+      "options": {
+        "two_way": "Beidseitig synchronisieren",
+        "alexa_to_ha": "Alexa → Home Assistant",
+        "ha_to_alexa": "Home Assistant → Alexa",
+        "move_alexa_to_ha": "Verschieben (Alexa → HA, danach auf Alexa löschen)"
+      }
+    },
+    "initial_sync_mode": {
+      "options": {
+        "merge_union": "Zusammenführen (Vereinigung beider Listen)",
+        "alexa_wins": "Alexa gewinnt (HA wird überschrieben)",
+        "ha_wins": "HA gewinnt (Alexa wird überschrieben)"
       }
     }
   },

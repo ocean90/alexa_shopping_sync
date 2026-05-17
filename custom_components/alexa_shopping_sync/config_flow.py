@@ -34,6 +34,7 @@ from homeassistant.config_entries import (
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import UnknownFlow
 from homeassistant.exceptions import Unauthorized
+from homeassistant.helpers import selector
 from yarl import URL
 
 from .auth import (
@@ -80,6 +81,62 @@ AUTH_PROXY_PATH = f"/auth/proxy/{DOMAIN}"
 AUTH_PROXY_NAME = f"auth:proxy:{DOMAIN}"
 AUTH_CALLBACK_PATH = f"/auth/callback/{DOMAIN}"
 AUTH_CALLBACK_NAME = f"auth:callback:{DOMAIN}"
+
+
+def _sync_mode_selector() -> selector.SelectSelector:
+    """Build SelectSelector for the sync_mode field.
+
+    Labels come from translations (selector.sync_mode.options.<value>) — this
+    is the only way to get translated dropdown labels in HA forms.
+    """
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[
+                selector.SelectOptionDict(value=mode.value, label=mode.value) for mode in SyncMode
+            ],
+            translation_key="sync_mode",
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
+def _initial_sync_mode_selector() -> selector.SelectSelector:
+    """Build SelectSelector for the initial_sync_mode field."""
+    return selector.SelectSelector(
+        selector.SelectSelectorConfig(
+            options=[
+                selector.SelectOptionDict(value=mode.value, label=mode.value)
+                for mode in InitialSyncMode
+            ],
+            translation_key="initial_sync_mode",
+            mode=selector.SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
+def _common_sync_options_schema(
+    *,
+    sync_mode_default: str,
+    poll_interval_default: int,
+    preserve_duplicates_default: bool,
+    mirror_completed_default: bool,
+    debug_mode_default: bool,
+) -> dict[Any, Any]:
+    """Shared schema fragment used in both initial and options flow.
+
+    Excludes initial_sync_mode (collected separately in initial flow,
+    omitted entirely in options flow).
+    """
+    return {
+        vol.Required(CONF_SYNC_MODE, default=sync_mode_default): _sync_mode_selector(),
+        vol.Required(CONF_POLL_INTERVAL, default=poll_interval_default): vol.All(
+            vol.Coerce(int),
+            vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
+        ),
+        vol.Required(CONF_PRESERVE_DUPLICATES, default=preserve_duplicates_default): bool,
+        vol.Required(CONF_MIRROR_COMPLETED, default=mirror_completed_default): bool,
+        vol.Required(CONF_DEBUG_MODE, default=debug_mode_default): bool,
+    }
 
 
 def _validate_url(url: str) -> bool:
@@ -540,76 +597,86 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_sync_options(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle sync options step."""
-        if user_input is not None:
-            full_config = {**self._user_input, **user_input}
+        """Step 1 of sync options: direction + behaviour flags.
 
-            return self.async_create_entry(
-                title=f"Alexa ({self._user_input.get(CONF_EMAIL, 'unknown')})",
-                data={
-                    CONF_AMAZON_DOMAIN: full_config.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN),
-                    CONF_EMAIL: full_config[CONF_EMAIL],
-                    CONF_PASSWORD: full_config[CONF_PASSWORD],
-                    CONF_OTP_SECRET: full_config[CONF_OTP_SECRET],
-                    CONF_HA_URL: full_config.get(CONF_HA_URL, ""),
-                    CONF_PUBLIC_URL: full_config.get(CONF_PUBLIC_URL, ""),
-                    CONF_TARGET_LIST: full_config.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST),
-                    "_cookies": full_config.get("_cookies", {}),
-                    "_refresh_token": full_config.get("_refresh_token", ""),
-                    "_device_serial": full_config.get("_device_serial", ""),
-                },
-                options={
-                    CONF_SYNC_MODE: full_config.get(CONF_SYNC_MODE, SyncMode.TWO_WAY),
-                    CONF_INITIAL_SYNC_MODE: full_config.get(
-                        CONF_INITIAL_SYNC_MODE, InitialSyncMode.MERGE_UNION
-                    ),
-                    CONF_POLL_INTERVAL: full_config.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-                    CONF_PRESERVE_DUPLICATES: full_config.get(
-                        CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES
-                    ),
-                    CONF_MIRROR_COMPLETED: full_config.get(
-                        CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED
-                    ),
-                    CONF_DEBUG_MODE: full_config.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
-                },
-            )
+        If MOVE mode is chosen, initial_sync_mode is irrelevant and the entry
+        is created immediately. Otherwise the user proceeds to the
+        ``initial_sync`` step.
+        """
+        if user_input is not None:
+            self._user_input.update(user_input)
+            if user_input.get(CONF_SYNC_MODE) == SyncMode.MOVE_ALEXA_TO_HA:
+                return self._create_entry_from_flow()
+            return await self.async_step_initial_sync()
 
         return self.async_show_form(
             step_id="sync_options",
             data_schema=vol.Schema(
+                _common_sync_options_schema(
+                    sync_mode_default=SyncMode.TWO_WAY,
+                    poll_interval_default=DEFAULT_POLL_INTERVAL,
+                    preserve_duplicates_default=DEFAULT_PRESERVE_DUPLICATES,
+                    mirror_completed_default=DEFAULT_MIRROR_COMPLETED,
+                    debug_mode_default=DEFAULT_DEBUG_MODE,
+                )
+            ),
+        )
+
+    async def async_step_initial_sync(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Step 2 of sync options: how to reconcile existing items on first sync.
+
+        Skipped entirely for MOVE_ALEXA_TO_HA \u2014 that mode has no initial
+        reconciliation phase.
+        """
+        if user_input is not None:
+            self._user_input.update(user_input)
+            return self._create_entry_from_flow()
+
+        return self.async_show_form(
+            step_id="initial_sync",
+            data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_SYNC_MODE, default=SyncMode.TWO_WAY): vol.In(
-                        {
-                            SyncMode.TWO_WAY: "Two-way sync",
-                            SyncMode.ALEXA_TO_HA: "Alexa \u2192 Home Assistant",
-                            SyncMode.HA_TO_ALEXA: "Home Assistant \u2192 Alexa",
-                        }
-                    ),
                     vol.Required(
                         CONF_INITIAL_SYNC_MODE,
                         default=InitialSyncMode.MERGE_UNION,
-                    ): vol.In(
-                        {
-                            InitialSyncMode.MERGE_UNION: "Merge (union of both lists)",
-                            InitialSyncMode.ALEXA_WINS: "Alexa wins (overwrite HA)",
-                            InitialSyncMode.HA_WINS: "HA wins (overwrite Alexa)",
-                        }
-                    ),
-                    vol.Required(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
-                    ),
-                    vol.Required(
-                        CONF_PRESERVE_DUPLICATES,
-                        default=DEFAULT_PRESERVE_DUPLICATES,
-                    ): bool,
-                    vol.Required(
-                        CONF_MIRROR_COMPLETED,
-                        default=DEFAULT_MIRROR_COMPLETED,
-                    ): bool,
-                    vol.Required(CONF_DEBUG_MODE, default=DEFAULT_DEBUG_MODE): bool,
+                    ): _initial_sync_mode_selector(),
                 }
             ),
+        )
+
+    def _create_entry_from_flow(self) -> ConfigFlowResult:
+        """Build the config entry from accumulated user input."""
+        full_config = self._user_input
+        return self.async_create_entry(
+            title=f"Alexa ({full_config.get(CONF_EMAIL, 'unknown')})",
+            data={
+                CONF_AMAZON_DOMAIN: full_config.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN),
+                CONF_EMAIL: full_config[CONF_EMAIL],
+                CONF_PASSWORD: full_config[CONF_PASSWORD],
+                CONF_OTP_SECRET: full_config[CONF_OTP_SECRET],
+                CONF_HA_URL: full_config.get(CONF_HA_URL, ""),
+                CONF_PUBLIC_URL: full_config.get(CONF_PUBLIC_URL, ""),
+                CONF_TARGET_LIST: full_config.get(CONF_TARGET_LIST, TARGET_SHOPPING_LIST),
+                "_cookies": full_config.get("_cookies", {}),
+                "_refresh_token": full_config.get("_refresh_token", ""),
+                "_device_serial": full_config.get("_device_serial", ""),
+            },
+            options={
+                CONF_SYNC_MODE: full_config.get(CONF_SYNC_MODE, SyncMode.TWO_WAY),
+                CONF_INITIAL_SYNC_MODE: full_config.get(
+                    CONF_INITIAL_SYNC_MODE, InitialSyncMode.MERGE_UNION
+                ),
+                CONF_POLL_INTERVAL: full_config.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
+                CONF_PRESERVE_DUPLICATES: full_config.get(
+                    CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES
+                ),
+                CONF_MIRROR_COMPLETED: full_config.get(
+                    CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED
+                ),
+                CONF_DEBUG_MODE: full_config.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
+            },
         )
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
@@ -776,43 +843,22 @@ class AlexaShoppingOptionsFlow(OptionsFlow):
         if current_target not in target_options:
             target_options[current_target] = current_target
 
+        schema_dict: dict[Any, Any] = {
+            vol.Required(CONF_TARGET_LIST, default=current_target): vol.In(target_options),
+            **_common_sync_options_schema(
+                sync_mode_default=options.get(CONF_SYNC_MODE, SyncMode.TWO_WAY),
+                poll_interval_default=options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
+                preserve_duplicates_default=options.get(
+                    CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES
+                ),
+                mirror_completed_default=options.get(
+                    CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED
+                ),
+                debug_mode_default=options.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
+            ),
+        }
+
         return self.async_show_form(
             step_id="init",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        CONF_TARGET_LIST,
-                        default=current_target,
-                    ): vol.In(target_options),
-                    vol.Required(
-                        CONF_SYNC_MODE,
-                        default=options.get(CONF_SYNC_MODE, SyncMode.TWO_WAY),
-                    ): vol.In(
-                        {
-                            SyncMode.TWO_WAY: "Two-way sync",
-                            SyncMode.ALEXA_TO_HA: "Alexa \u2192 Home Assistant",
-                            SyncMode.HA_TO_ALEXA: "Home Assistant \u2192 Alexa",
-                        }
-                    ),
-                    vol.Required(
-                        CONF_POLL_INTERVAL,
-                        default=options.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL),
-                    ): vol.All(
-                        vol.Coerce(int),
-                        vol.Range(min=MIN_POLL_INTERVAL, max=MAX_POLL_INTERVAL),
-                    ),
-                    vol.Required(
-                        CONF_PRESERVE_DUPLICATES,
-                        default=options.get(CONF_PRESERVE_DUPLICATES, DEFAULT_PRESERVE_DUPLICATES),
-                    ): bool,
-                    vol.Required(
-                        CONF_MIRROR_COMPLETED,
-                        default=options.get(CONF_MIRROR_COMPLETED, DEFAULT_MIRROR_COMPLETED),
-                    ): bool,
-                    vol.Required(
-                        CONF_DEBUG_MODE,
-                        default=options.get(CONF_DEBUG_MODE, DEFAULT_DEBUG_MODE),
-                    ): bool,
-                }
-            ),
+            data_schema=vol.Schema(schema_dict),
         )
