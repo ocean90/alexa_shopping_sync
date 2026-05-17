@@ -79,23 +79,6 @@
       "already_configured": "Dieses Amazon-Konto ist bereits konfiguriert",
       "reauth_successful": "Erneute Authentifizierung erfolgreich",
       "no_target_list_available": "Keine Ziel-Liste verfügbar. Bitte richte zuerst die Einkaufslisten-Integration oder eine Aufgabenlisten-Integration ein."
-    },
-    "selector": {
-      "sync_mode": {
-        "options": {
-          "two_way": "Beidseitig synchronisieren",
-          "alexa_to_ha": "Alexa → Home Assistant",
-          "ha_to_alexa": "Home Assistant → Alexa",
-          "move_alexa_to_ha": "Verschieben (Alexa → HA, danach auf Alexa löschen)"
-        }
-      },
-      "initial_sync_mode": {
-        "options": {
-          "merge_union": "Zusammenführen (Vereinigung beider Listen)",
-          "alexa_wins": "Alexa gewinnt (HA wird überschrieben)",
-          "ha_wins": "HA gewinnt (Alexa wird überschrieben)"
-        }
-      }
     }
   },
   "options": {
@@ -115,15 +98,22 @@
           "sync_mode": "Richtung der Synchronisation. „Verschieben“ leert Alexa in jedem Zyklus in HA — HA-Änderungen werden nicht zurück gespiegelt."
         }
       }
+    }
+  },
+  "selector": {
+    "sync_mode": {
+      "options": {
+        "two_way": "Beidseitig synchronisieren",
+        "alexa_to_ha": "Alexa → Home Assistant",
+        "ha_to_alexa": "Home Assistant → Alexa",
+        "move_alexa_to_ha": "Verschieben (Alexa → HA, danach auf Alexa löschen)"
+      }
     },
-    "selector": {
-      "sync_mode": {
-        "options": {
-          "two_way": "Beidseitig synchronisieren",
-          "alexa_to_ha": "Alexa → Home Assistant",
-          "ha_to_alexa": "Home Assistant → Alexa",
-          "move_alexa_to_ha": "Verschieben (Alexa → HA, danach auf Alexa löschen)"
-        }
+    "initial_sync_mode": {
+      "options": {
+        "merge_union": "Zusammenführen (Vereinigung beider Listen)",
+        "alexa_wins": "Alexa gewinnt (HA wird überschrieben)",
+        "ha_wins": "HA gewinnt (Alexa wird überschrieben)"
       }
     }
   },
