@@ -526,3 +526,167 @@ class TestIncrementalDedup:
         assert result.alexa_to_ha_adds == 0
         assert len(sync_engine.state.mappings) == 1
         mock_ha_bridge.async_add_item.assert_not_called()
+
+
+class TestMoveAlexaToHa:
+    """Tests for MOVE_ALEXA_TO_HA sync mode.
+
+    Move semantics: each cycle drains everything currently on Alexa into HA,
+    then deletes from Alexa. No mappings, no HA→Alexa direction.
+    """
+
+    @pytest.mark.asyncio
+    async def test_initial_move_copies_and_deletes(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """Initial cycle: every Alexa item lands in HA and is removed from Alexa."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        alexa_items = [make_alexa_item("a1", "Milk"), make_alexa_item("a2", "Bread")]
+        mock_ha_bridge.async_add_item.side_effect = [
+            make_ha_item("h1", "Milk"),
+            make_ha_item("h2", "Bread"),
+        ]
+
+        result = await sync_engine.async_sync_alexa_to_ha(alexa_items)
+
+        assert result.alexa_to_ha_adds == 2
+        assert result.move_deletes == 2
+        assert mock_amazon_client.async_delete_item.call_count == 2
+        # No mappings — move mode is mappingless
+        assert len(sync_engine.state.mappings) == 0
+
+    @pytest.mark.asyncio
+    async def test_initial_move_does_not_touch_ha_only_items(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """HA-only items must remain untouched (no HA→Alexa direction in move mode)."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        mock_ha_bridge.async_get_items.return_value = [make_ha_item("h99", "Cheese")]
+
+        result = await sync_engine.async_sync_alexa_to_ha([])
+
+        assert result.alexa_to_ha_adds == 0
+        assert result.move_deletes == 0
+        mock_ha_bridge.async_delete_item.assert_not_called()
+        mock_amazon_client.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_incremental_move_dedups_against_existing_ha(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """If HA already has the item, skip the add but still delete from Alexa."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+        mock_ha_bridge.async_get_items.return_value = [make_ha_item("h1", "Milk")]
+
+        result = await sync_engine.async_sync_alexa_to_ha([make_alexa_item("a1", "Milk")])
+
+        assert result.alexa_to_ha_adds == 0
+        assert result.move_deletes == 1
+        mock_ha_bridge.async_add_item.assert_not_called()
+        mock_amazon_client.async_delete_item.assert_called_once_with("a1")
+
+    @pytest.mark.asyncio
+    async def test_move_preserves_alexa_duplicates(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """Two Alexa items with same name must both land in HA (used-set guard)."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+        mock_ha_bridge.async_get_items.return_value = []
+        mock_ha_bridge.async_add_item.side_effect = [
+            make_ha_item("h1", "Milk"),
+            make_ha_item("h2", "Milk"),
+        ]
+
+        result = await sync_engine.async_sync_alexa_to_ha(
+            [make_alexa_item("a1", "Milk"), make_alexa_item("a2", "Milk")]
+        )
+
+        assert result.alexa_to_ha_adds == 2
+        assert result.move_deletes == 2
+
+    @pytest.mark.asyncio
+    async def test_move_retries_after_alexa_delete_failure(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """If the Alexa delete fails, the next cycle must retry without creating a HA duplicate."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+
+        # Cycle 1: add succeeds, Alexa delete fails
+        mock_ha_bridge.async_get_items.return_value = []
+        mock_ha_bridge.async_add_item.return_value = make_ha_item("h1", "Milk")
+        mock_amazon_client.async_delete_item.return_value = False
+
+        result1 = await sync_engine.async_sync_alexa_to_ha([make_alexa_item("a1", "Milk")])
+        assert result1.alexa_to_ha_adds == 1
+        assert result1.move_deletes == 0  # delete returned False
+
+        # Cycle 2: same Alexa item still present, HA already has it.
+        # Reset call tracking after cycle 1.
+        mock_ha_bridge.async_add_item.reset_mock()
+        mock_amazon_client.async_delete_item.reset_mock()
+        mock_amazon_client.async_delete_item.return_value = True
+        mock_ha_bridge.async_get_items.return_value = [make_ha_item("h1", "Milk")]
+
+        result2 = await sync_engine.async_sync_alexa_to_ha([make_alexa_item("a1", "Milk")])
+
+        # No duplicate add — dedup matched the HA item from cycle 1.
+        # Delete is retried and now succeeds.
+        assert result2.alexa_to_ha_adds == 0
+        assert result2.move_deletes == 1
+        mock_ha_bridge.async_add_item.assert_not_called()
+        mock_amazon_client.async_delete_item.assert_called_once_with("a1")
+
+    @pytest.mark.asyncio
+    async def test_move_skips_alexa_delete_when_ha_add_fails(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """If the HA add raises, the Alexa item must not be deleted (would cause data loss)."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+        mock_ha_bridge.async_get_items.return_value = []
+        mock_ha_bridge.async_add_item.side_effect = RuntimeError("HA bridge down")
+
+        result = await sync_engine.async_sync_alexa_to_ha([make_alexa_item("a1", "Milk")])
+
+        assert result.alexa_to_ha_adds == 0
+        assert result.move_deletes == 0
+        assert result.errors
+        mock_amazon_client.async_delete_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_move_disables_ha_to_alexa_direction(self, sync_engine, mock_amazon_client):
+        """HA changes must not propagate to Alexa in move mode."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_ha_items = []
+
+        result = await sync_engine.async_sync_ha_to_alexa([make_ha_item("h1", "Eggs")])
+
+        assert result.ha_to_alexa_adds == 0
+        mock_amazon_client.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_move_completed_item_is_moved_with_status(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """A completed Alexa item should be copied to HA as completed, then deleted."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+        mock_ha_bridge.async_get_items.return_value = []
+        mock_ha_bridge.async_add_item.return_value = make_ha_item("h1", "Milk", complete=True)
+
+        result = await sync_engine.async_sync_alexa_to_ha(
+            [make_alexa_item("a1", "Milk", complete=True)]
+        )
+
+        assert result.alexa_to_ha_adds == 1
+        assert result.move_deletes == 1
+        mock_ha_bridge.async_add_item.assert_called_once_with("Milk", True)
