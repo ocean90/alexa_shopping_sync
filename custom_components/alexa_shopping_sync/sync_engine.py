@@ -569,6 +569,12 @@ class SyncEngine:
         2. Else add the item to HA.
         3. Delete the Alexa item. On failure, item is retried next cycle —
            dedup ensures no HA duplicate is created in the meantime.
+
+        Move mode ignores ``mirror_completed``: a true "drain" must remove
+        every item — including completed ones — or the Alexa list would
+        accumulate completed items forever. Completed items are copied to
+        HA with their status preserved, matching the user-facing promise
+        of the mode label ("Move (Alexa → HA, delete from Alexa)").
         """
         result = SyncResult()
         if ha_items_cache is None:
@@ -579,9 +585,6 @@ class SyncEngine:
         used_ha_ids: set[str] = set()
 
         for item in alexa_items:
-            if not self._mirror_completed and item.complete:
-                continue
-
             ha_add_ok = True
             try:
                 existing = self._match_item_by_name(

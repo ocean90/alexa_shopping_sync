@@ -690,3 +690,25 @@ class TestMoveAlexaToHa:
         assert result.alexa_to_ha_adds == 1
         assert result.move_deletes == 1
         mock_ha_bridge.async_add_item.assert_called_once_with("Milk", True)
+
+    @pytest.mark.asyncio
+    async def test_move_ignores_mirror_completed_false(
+        self, sync_engine, mock_ha_bridge, mock_amazon_client
+    ):
+        """Move semantics require draining everything — completed items must not
+        accumulate on Alexa even when mirror_completed is disabled."""
+        sync_engine._sync_mode = SyncMode.MOVE_ALEXA_TO_HA
+        sync_engine._mirror_completed = False
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_alexa_items = []
+        mock_ha_bridge.async_get_items.return_value = []
+        mock_ha_bridge.async_add_item.return_value = make_ha_item("h1", "Milk", complete=True)
+
+        result = await sync_engine.async_sync_alexa_to_ha(
+            [make_alexa_item("a1", "Milk", complete=True)]
+        )
+
+        assert result.alexa_to_ha_adds == 1
+        assert result.move_deletes == 1
+        mock_ha_bridge.async_add_item.assert_called_once_with("Milk", True)
+        mock_amazon_client.async_delete_item.assert_called_once_with("a1")

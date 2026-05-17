@@ -37,7 +37,6 @@
         "title": "Sync Options",
         "data": {
           "sync_mode": "Sync Mode",
-          "initial_sync_mode": "Initial Sync Mode",
           "poll_interval": "Poll Interval (seconds)",
           "preserve_duplicates": "Preserve duplicate items",
           "mirror_completed": "Sync completed items",
@@ -45,8 +44,17 @@
         },
         "data_description": {
           "sync_mode": "Direction of synchronization",
-          "initial_sync_mode": "How to handle existing items on first sync",
           "poll_interval": "How often to check for changes (30-600 seconds)"
+        }
+      },
+      "initial_sync": {
+        "title": "Initial Sync Strategy",
+        "description": "How should existing items be reconciled the first time the integration syncs?",
+        "data": {
+          "initial_sync_mode": "Initial Sync Mode"
+        },
+        "data_description": {
+          "initial_sync_mode": "Applied once on first sync. Has no effect afterwards."
         }
       },
       "reauth_confirm": {
@@ -71,6 +79,23 @@
       "already_configured": "This Amazon account is already configured",
       "reauth_successful": "Re-authentication successful",
       "no_target_list_available": "No target list available. Please set up the Shopping List integration or a to-do list integration first."
+    },
+    "selector": {
+      "sync_mode": {
+        "options": {
+          "two_way": "Two-way sync",
+          "alexa_to_ha": "Alexa → Home Assistant",
+          "ha_to_alexa": "Home Assistant → Alexa",
+          "move_alexa_to_ha": "Move (Alexa → HA, delete from Alexa)"
+        }
+      },
+      "initial_sync_mode": {
+        "options": {
+          "merge_union": "Merge (union of both lists)",
+          "alexa_wins": "Alexa wins (overwrite HA)",
+          "ha_wins": "HA wins (overwrite Alexa)"
+        }
+      }
     }
   },
   "options": {
@@ -86,7 +111,18 @@
           "debug_mode": "Enable debug logging"
         },
         "data_description": {
-          "target_list": "Changing the target list will clear all item mappings and trigger a full resync."
+          "target_list": "Changing the target list will clear all item mappings and trigger a full resync.",
+          "sync_mode": "Direction of synchronization. 'Move' empties Alexa into HA on every cycle — HA changes are not mirrored back."
+        }
+      }
+    },
+    "selector": {
+      "sync_mode": {
+        "options": {
+          "two_way": "Two-way sync",
+          "alexa_to_ha": "Alexa → Home Assistant",
+          "ha_to_alexa": "Home Assistant → Alexa",
+          "move_alexa_to_ha": "Move (Alexa → HA, delete from Alexa)"
         }
       }
     }
