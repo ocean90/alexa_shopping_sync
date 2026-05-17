@@ -100,6 +100,10 @@
       "title": "Alexa Shopping Sync: Einkaufsliste nicht gefunden",
       "description": "Die Home Assistant Einkaufslisten-Integration ist nicht konfiguriert. Bitte füge sie hinzu, damit die Synchronisation funktioniert."
     },
+    "target_list_missing": {
+      "title": "Alexa Shopping Sync: Ziel-Liste nicht gefunden",
+      "description": "Die konfigurierte Ziel-Aufgabenliste ({entity_id}) ist nicht verfügbar. Bitte stelle sicher, dass die zugehörige Integration eingerichtet und gestartet ist, und lade Alexa Shopping List Sync anschliessend neu."
+    },
     "passkey_detected": {
       "title": "Alexa Shopping Sync: Passkey-Anmeldung nicht unterstützt",
       "description": "Amazon erfordert einen Passkey zur Anmeldung. Diese Integration unterstützt nur Authenticator-App-2SV. Bitte deaktiviere Passkeys in deinen Amazon-Kontoeinstellungen."

@@ -14,6 +14,8 @@ Home Assistant HACS custom integration that bidirectionally syncs the Amazon Ale
 
 Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:` — lowercase, imperative, no period.
 
+All commit messages, PR titles, and PR descriptions must be written in **English**, regardless of the language of the conversation.
+
 **Version** is tracked in two files — both must be updated together:
 - `pyproject.toml` (`version` field)
 - `custom_components/alexa_shopping_sync/manifest.json` (`version` field)

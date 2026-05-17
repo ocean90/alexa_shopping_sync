@@ -6,7 +6,8 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CoreState, HomeAssistant
+from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import issue_registry as ir
 
 from .const import CONF_TARGET_LIST, DOMAIN, TARGET_SHOPPING_LIST
@@ -46,20 +47,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry
     else:
         state = hass.states.get(target_list)
         if state is None:
-            ir.async_create_issue(
-                hass,
-                DOMAIN,
-                "target_list_missing",
-                is_fixable=False,
-                severity=ir.IssueSeverity.ERROR,
-                translation_key="target_list_missing",
-            )
-            _LOGGER.error(
-                "Target todo entity %s not found. "
-                "Please ensure the integration providing it is configured",
-                target_list,
-            )
-            return False
+            # During HA startup, integration load order isn't guaranteed — the
+            # target list's integration may simply not be up yet. Raise
+            # ConfigEntryNotReady so HA retries with backoff; only surface a
+            # user-visible issue once HA has finished starting and the entity
+            # is genuinely missing.
+            if hass.state is CoreState.running:
+                ir.async_create_issue(
+                    hass,
+                    DOMAIN,
+                    "target_list_missing",
+                    is_fixable=False,
+                    severity=ir.IssueSeverity.ERROR,
+                    translation_key="target_list_missing",
+                    translation_placeholders={"entity_id": target_list},
+                )
+                _LOGGER.error(
+                    "Target todo entity %s not found. "
+                    "Please ensure the integration providing it is configured",
+                    target_list,
+                )
+            raise ConfigEntryNotReady(f"Target todo entity {target_list} not yet available")
+
+    ir.async_delete_issue(hass, DOMAIN, "target_list_missing")
+    ir.async_delete_issue(hass, DOMAIN, "shopping_list_missing")
 
     coordinator = AlexaShoppingCoordinator(hass, entry)
     await coordinator.async_initialize()
