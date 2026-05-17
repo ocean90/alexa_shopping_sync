@@ -58,6 +58,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry
             # user-visible issue once HA has finished starting and the entity
             # is genuinely missing.
             if hass.state is CoreState.running:
+                # Detect first failure before creating the issue so retries
+                # don't spam the log — the issue registry entry provides
+                # ongoing visibility while ConfigEntryNotReady keeps retrying.
+                is_first_failure = (
+                    ir.async_get(hass).async_get_issue(DOMAIN, target_list_issue_id) is None
+                )
                 ir.async_create_issue(
                     hass,
                     DOMAIN,
@@ -67,11 +73,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: AlexaShoppingConfigEntry
                     translation_key="target_list_missing",
                     translation_placeholders={"entity_id": target_list},
                 )
-                _LOGGER.error(
-                    "Target todo entity %s not found. "
-                    "Please ensure the integration providing it is configured",
-                    target_list,
-                )
+                if is_first_failure:
+                    _LOGGER.error(
+                        "Target todo entity %s not found. "
+                        "Please ensure the integration providing it is configured; "
+                        "setup will retry automatically",
+                        target_list,
+                    )
             raise ConfigEntryNotReady(f"Target todo entity {target_list} not yet available")
 
     ir.async_delete_issue(hass, DOMAIN, target_list_issue_id)

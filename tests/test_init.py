@@ -49,12 +49,19 @@ async def test_target_missing_during_startup_raises_not_ready_without_issue():
 
 
 @pytest.mark.asyncio
-async def test_target_missing_after_startup_creates_issue_and_raises_not_ready():
+async def test_target_missing_after_startup_creates_issue_and_raises_not_ready(caplog):
     """Once HA is running, a missing target is a real problem — surface it."""
     hass = _make_hass(CoreState.running, states={})
     entry = _make_entry("todo.cookidoo_extras")
 
+    issue_registry = MagicMock()
+    issue_registry.async_get_issue = MagicMock(return_value=None)
+
     with (
+        patch(
+            "custom_components.alexa_shopping_sync.ir.async_get",
+            return_value=issue_registry,
+        ),
         patch("custom_components.alexa_shopping_sync.ir.async_create_issue") as create_issue,
         patch("custom_components.alexa_shopping_sync.ir.async_delete_issue") as delete_issue,
     ):
@@ -68,6 +75,40 @@ async def test_target_missing_after_startup_creates_issue_and_raises_not_ready()
     assert kwargs["translation_key"] == "target_list_missing"
     assert kwargs["translation_placeholders"] == {"entity_id": "todo.cookidoo_extras"}
     delete_issue.assert_not_called()
+    # First failure -> exactly one ERROR log
+    error_records = [
+        r for r in caplog.records if r.levelname == "ERROR" and "Target todo entity" in r.message
+    ]
+    assert len(error_records) == 1
+
+
+@pytest.mark.asyncio
+async def test_target_missing_retries_do_not_spam_log(caplog):
+    """ConfigEntryNotReady triggers retries; only the first one should log."""
+    hass = _make_hass(CoreState.running, states={})
+    entry = _make_entry("todo.cookidoo_extras")
+
+    issue_registry = MagicMock()
+    # Simulate: first call returns None (no issue yet), subsequent calls
+    # return an existing entry (issue was created by the first attempt).
+    issue_registry.async_get_issue = MagicMock(side_effect=[None, MagicMock(), MagicMock()])
+
+    with (
+        patch(
+            "custom_components.alexa_shopping_sync.ir.async_get",
+            return_value=issue_registry,
+        ),
+        patch("custom_components.alexa_shopping_sync.ir.async_create_issue"),
+        patch("custom_components.alexa_shopping_sync.ir.async_delete_issue"),
+    ):
+        for _ in range(3):
+            with pytest.raises(ConfigEntryNotReady):
+                await async_setup_entry(hass, entry)
+
+    error_records = [
+        r for r in caplog.records if r.levelname == "ERROR" and "Target todo entity" in r.message
+    ]
+    assert len(error_records) == 1
 
 
 @pytest.mark.asyncio
@@ -113,7 +154,14 @@ async def test_multiple_entries_use_distinct_issue_ids():
     entry_a = _make_entry("todo.cookidoo_extras", entry_id="entry-a")
     entry_b = _make_entry("todo.bring_list", entry_id="entry-b")
 
+    issue_registry = MagicMock()
+    issue_registry.async_get_issue = MagicMock(return_value=None)
+
     with (
+        patch(
+            "custom_components.alexa_shopping_sync.ir.async_get",
+            return_value=issue_registry,
+        ),
         patch("custom_components.alexa_shopping_sync.ir.async_create_issue") as create_issue,
         patch("custom_components.alexa_shopping_sync.ir.async_delete_issue"),
     ):

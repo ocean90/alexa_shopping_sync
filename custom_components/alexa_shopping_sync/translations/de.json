@@ -102,7 +102,7 @@
     },
     "target_list_missing": {
       "title": "Alexa Shopping Sync: Ziel-Liste nicht gefunden",
-      "description": "Die konfigurierte Ziel-Aufgabenliste ({entity_id}) ist nicht verfügbar. Bitte stelle sicher, dass die zugehörige Integration eingerichtet und gestartet ist, und lade Alexa Shopping List Sync anschließend neu."
+      "description": "Die konfigurierte Ziel-Aufgabenliste ({entity_id}) ist nicht verfügbar. Bitte stelle sicher, dass die zugehörige Integration eingerichtet und gestartet ist – Alexa Shopping List Sync versucht es automatisch erneut, sobald die Entität verfügbar ist."
     },
     "passkey_detected": {
       "title": "Alexa Shopping Sync: Passkey-Anmeldung nicht unterstützt",

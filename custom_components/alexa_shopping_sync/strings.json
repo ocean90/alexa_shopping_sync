@@ -102,7 +102,7 @@
     },
     "target_list_missing": {
       "title": "Alexa Shopping Sync: Target list not found",
-      "description": "The configured target to-do entity ({entity_id}) is not available. Please ensure the integration providing it is configured and running, then reload Alexa Shopping List Sync."
+      "description": "The configured target to-do entity ({entity_id}) is not available. Make sure the integration providing it is configured and running — Alexa Shopping List Sync will retry automatically as soon as the entity appears."
     },
     "passkey_detected": {
       "title": "Alexa Shopping Sync: Passkey login not supported",
