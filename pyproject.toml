@@ -17,7 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "homeassistant==2026.4.0",
-    "ruff==0.15.13",
+    "ruff==0.15.14",
 ]
 test = [
     "pytest>=8.0.0",
