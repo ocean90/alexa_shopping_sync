@@ -12,6 +12,7 @@ import httpx
 import pyotp
 from bs4 import BeautifulSoup
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.httpx_client import create_async_httpx_client
 
 from .const import (
     AMAZON_APP_NAME,
@@ -169,7 +170,13 @@ class AuthManager:
         if self._session and not self._session.is_closed:
             await self._session.aclose()
 
-        self._session = httpx.AsyncClient(
+        # auto_cleanup=False: this method also runs on every token-exchange renewal,
+        # so HA's per-client shutdown listener would accumulate. The previous session
+        # is explicitly closed above before a new one is created.
+        self._session = create_async_httpx_client(
+            self._hass,
+            verify_ssl=True,
+            auto_cleanup=False,
             timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
             follow_redirects=True,
             headers={"User-Agent": AMAZON_USER_AGENT},
@@ -294,7 +301,10 @@ class AuthManager:
         }
 
         try:
-            async with httpx.AsyncClient(
+            async with create_async_httpx_client(
+                self._hass,
+                verify_ssl=True,
+                auto_cleanup=False,
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
@@ -399,7 +409,10 @@ class AuthManager:
         )
 
         try:
-            async with httpx.AsyncClient(
+            async with create_async_httpx_client(
+                self._hass,
+                verify_ssl=True,
+                auto_cleanup=False,
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
                 follow_redirects=True,
                 headers={"User-Agent": AMAZON_USER_AGENT},
@@ -541,6 +554,7 @@ class AuthManager:
 
 
 async def async_register_device(
+    hass: HomeAssistant,
     amazon_domain: str,
     device_serial: str,
     cookies: dict[str, str],
@@ -606,7 +620,10 @@ async def async_register_device(
         payload["cookies"]["domain"] = f".{domain}"
         _LOGGER.debug("Attempting device registration with api.%s", domain)
         try:
-            async with httpx.AsyncClient(
+            async with create_async_httpx_client(
+                hass,
+                verify_ssl=True,
+                auto_cleanup=False,
                 timeout=httpx.Timeout(connect=30.0, read=60.0, write=30.0, pool=30.0),
                 headers={
                     "Content-Type": "application/json",

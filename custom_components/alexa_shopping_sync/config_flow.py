@@ -35,6 +35,7 @@ from homeassistant.core import callback
 from homeassistant.data_entry_flow import UnknownFlow
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import selector
+from homeassistant.helpers.httpx_client import create_async_httpx_client
 from yarl import URL
 
 from .auth import (
@@ -316,7 +317,11 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
                     URL(proxy_base_url),
                     URL(login_url),
                 )
-                self._proxy.session_factory = lambda: httpx.AsyncClient(
+                self._proxy.session_factory = lambda: create_async_httpx_client(
+                    self.hass,
+                    verify_ssl=True,
+                    auto_cleanup=False,
+                    follow_redirects=False,
                     timeout=httpx.Timeout(connect=30.0, read=120.0, write=30.0, pool=30.0),
                 )
             except ValueError as ex:
@@ -510,6 +515,7 @@ class AlexaShoppingConfigFlow(ConfigFlow, domain=DOMAIN):
         # instead of programmatic login (which fails due to missing metadata1).
         amazon_domain = self._user_input.get(CONF_AMAZON_DOMAIN, DEFAULT_AMAZON_DOMAIN)
         refresh_token = await async_register_device(
+            self.hass,
             amazon_domain=amazon_domain,
             device_serial=self._device_serial,
             cookies=cookies,

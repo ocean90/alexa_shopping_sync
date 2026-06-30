@@ -46,12 +46,13 @@ class TestDeviceRegistrationLogging:
 
         with (
             patch(
-                "custom_components.alexa_shopping_sync.auth.httpx.AsyncClient",
+                "custom_components.alexa_shopping_sync.auth.create_async_httpx_client",
                 return_value=mock_client,
             ),
             caplog.at_level(logging.WARNING),
         ):
             result = await self.register(
+                MagicMock(),
                 amazon_domain="amazon.de",
                 device_serial="serial123",
                 cookies={"session-id": "test"},
@@ -77,12 +78,13 @@ class TestDeviceRegistrationLogging:
 
         with (
             patch(
-                "custom_components.alexa_shopping_sync.auth.httpx.AsyncClient",
+                "custom_components.alexa_shopping_sync.auth.create_async_httpx_client",
                 return_value=mock_client,
             ),
             caplog.at_level(logging.WARNING),
         ):
             result = await self.register(
+                MagicMock(),
                 amazon_domain="amazon.de",
                 device_serial="serial123",
                 cookies={"session-id": "test"},
@@ -126,6 +128,7 @@ class TestTokenExchangeLogging:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         auth = AuthManager.__new__(AuthManager)
+        auth._hass = MagicMock()
         auth._amazon_domain = "amazon.de"
         auth._refresh_token = "fake_refresh"
         auth._device_serial = "serial123"
@@ -134,7 +137,7 @@ class TestTokenExchangeLogging:
 
         with (
             patch(
-                "custom_components.alexa_shopping_sync.auth.httpx.AsyncClient",
+                "custom_components.alexa_shopping_sync.auth.create_async_httpx_client",
                 return_value=mock_client,
             ),
             caplog.at_level(logging.WARNING),
