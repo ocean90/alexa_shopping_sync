@@ -13,6 +13,9 @@ from .models import HAShoppingItem
 
 _LOGGER = logging.getLogger(__name__)
 
+# Domain of Home Assistant's built-in Shopping List integration.
+SHOPPING_LIST_DOMAIN = "shopping_list"
+
 
 class ShoppingListBridge:
     """Bridge to HA's built-in shopping list.
@@ -33,15 +36,27 @@ class ShoppingListBridge:
     def _get_shopping_data(self) -> Any:
         """Get the ShoppingData instance.
 
+        Modern HA (config-entry based shopping_list) stores ``ShoppingData``
+        on the loaded config entry's ``runtime_data`` and no longer mirrors it
+        into ``hass.data["shopping_list"]``. We look it up via the loaded
+        config entry first and fall back to ``hass.data`` for older cores, so
+        the bridge keeps working across HA versions.
+
         Raises ShoppingListMissingError if not available.
         """
-        shopping_data = self._hass.data.get("shopping_list")
-        if shopping_data is None:
-            raise ShoppingListMissingError(
-                "Home Assistant Shopping List integration is not configured. "
-                "Please add it via Settings → Integrations."
-            )
-        return shopping_data
+        entries = self._hass.config_entries.async_loaded_entries(SHOPPING_LIST_DOMAIN)
+        if entries and entries[0].runtime_data is not None:
+            return entries[0].runtime_data
+
+        # Fallback for older cores that exposed ShoppingData via hass.data.
+        shopping_data = self._hass.data.get(SHOPPING_LIST_DOMAIN)
+        if shopping_data is not None:
+            return shopping_data
+
+        raise ShoppingListMissingError(
+            "Home Assistant Shopping List integration is not configured. "
+            "Please add it via Settings → Integrations."
+        )
 
     async def async_validate_available(self) -> bool:
         """Check if the HA shopping list is available."""
