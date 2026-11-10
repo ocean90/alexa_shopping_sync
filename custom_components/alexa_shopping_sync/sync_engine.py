@@ -116,6 +116,8 @@ class SyncEngine:
         data = await self._store.async_load()
         if data:
             self._state = SyncState.from_dict(data)
+            if self._state.ha_snapshot is not None:
+                self._previous_ha_items = list(self._state.ha_snapshot)
             if self._state.shopping_list_id:
                 self._amazon.shopping_list_id = self._state.shopping_list_id
             if self._state.mappings:
@@ -128,6 +130,9 @@ class SyncEngine:
 
     async def async_save_state(self) -> None:
         """Persist state to storage."""
+        # Mappings alone cannot tell whether an item was checked off while
+        # HA was restarting. Keep the last observed HA status as the baseline.
+        self._state.ha_snapshot = list(self._previous_ha_items)
         await self._store.async_save(self._state.to_dict())
 
     async def async_clear_state(self) -> None:
@@ -1032,6 +1037,7 @@ class SyncEngine:
                     result.errors.append(f"Delete from Alexa: {err}")
 
         # Handle modified items
+        failed_updates: dict[str, HAShoppingItem] = {}
         for old_item, new_item in diff.modified:
             if self._is_echo(PendingOpType.UPDATE, new_item.name, new_item.item_id):
                 result.skipped_echo += 1
@@ -1052,11 +1058,13 @@ class SyncEngine:
 
                 if update_name is not None or update_complete is not None:
                     try:
-                        await self._amazon.async_update_item(
+                        updated = await self._amazon.async_update_item(
                             mapping.alexa_id,
                             summary=update_name,
                             complete=update_complete,
                         )
+                        if updated is None:
+                            raise RuntimeError("Amazon did not confirm the item update")
                         op_type = (
                             PendingOpType.COMPLETE
                             if update_complete is not None and update_name is None
@@ -1074,8 +1082,11 @@ class SyncEngine:
                         result.ha_to_alexa_updates += 1
                     except Exception as err:
                         result.errors.append(f"Update Alexa item: {err}")
+                        failed_updates[new_item.item_id] = old_item
 
-        self._previous_ha_items = ha_items
+        # Retain the old status only for failed writes, so unchanged HA
+        # snapshots retry them on the next cycle (and after a restart).
+        self._previous_ha_items = [failed_updates.get(i.item_id, i) for i in ha_items]
         return result
 
     async def async_full_resync(self) -> SyncResult:

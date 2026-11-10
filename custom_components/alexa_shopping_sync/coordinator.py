@@ -475,27 +475,25 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                             ha_items = await self._ha_bridge.async_get_items()
                             self._ha_item_count = len(ha_items)
 
-                            # Hybrid polling for todo targets: state_changed
-                            # doesn't fire on renames, so also check hash on
-                            # each poll cycle and sync if changed.
+                            # Always feed todo snapshots to the engine. This
+                            # establishes the baseline after an upgrade/restart
+                            # and retries failed writes even if HA is unchanged.
                             if self._target_list != TARGET_SHOPPING_LIST:
                                 ha_hash = compute_snapshot_hash(ha_items)
-                                if (
-                                    self._sync_engine.state.last_ha_snapshot_hash
-                                    and ha_hash != self._sync_engine.state.last_ha_snapshot_hash
-                                ):
-                                    ha_result = await self._sync_engine.async_sync_ha_to_alexa(
-                                        ha_items
-                                    )
-                                    _LOGGER.debug(
-                                        "Todo poll HA->Alexa: +%d ~%d -%d",
-                                        ha_result.ha_to_alexa_adds,
-                                        ha_result.ha_to_alexa_updates,
-                                        ha_result.ha_to_alexa_deletes,
-                                    )
+                                ha_result = await self._sync_engine.async_sync_ha_to_alexa(ha_items)
+                                result.errors.extend(ha_result.errors)
+                                self._alexa_item_count += (
+                                    ha_result.ha_to_alexa_adds - ha_result.ha_to_alexa_deletes
+                                )
+                                _LOGGER.debug(
+                                    "Todo poll HA->Alexa: +%d ~%d -%d",
+                                    ha_result.ha_to_alexa_adds,
+                                    ha_result.ha_to_alexa_updates,
+                                    ha_result.ha_to_alexa_deletes,
+                                )
                                 self._sync_engine.state.last_ha_snapshot_hash = ha_hash
-                        except Exception:
-                            pass
+                        except Exception as err:
+                            result.errors.append(f"Read/sync HA list: {err}")
 
                     self._sync_engine.state.last_alexa_snapshot_hash = (
                         self._amazon_client.compute_snapshot_hash(alexa_items)
@@ -515,7 +513,7 @@ class AlexaShoppingCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
                     if result.errors:
                         _LOGGER.warning(
-                            "Alexa->HA sync had %d errors: %s",
+                            "Shopping list sync had %d errors: %s",
                             len(result.errors),
                             result.errors[:3],
                         )

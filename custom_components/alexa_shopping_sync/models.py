@@ -173,6 +173,7 @@ class SyncState:
 
     mappings: list[ItemMapping] = field(default_factory=list)
     pending_ops: list[PendingOperation] = field(default_factory=list)
+    ha_snapshot: list[HAShoppingItem] | None = None
     shopping_list_id: str = ""
     last_alexa_snapshot_hash: str = ""
     last_ha_snapshot_hash: str = ""
@@ -185,6 +186,14 @@ class SyncState:
         return {
             "mappings": [m.to_dict() for m in self.mappings],
             "pending_ops": [p.to_dict() for p in self.pending_ops],
+            "ha_snapshot": (
+                [
+                    {"item_id": i.item_id, "name": i.name, "complete": i.complete}
+                    for i in self.ha_snapshot
+                ]
+                if self.ha_snapshot is not None
+                else None
+            ),
             "shopping_list_id": self.shopping_list_id,
             "last_alexa_snapshot_hash": self.last_alexa_snapshot_hash,
             "last_ha_snapshot_hash": self.last_ha_snapshot_hash,
@@ -199,6 +208,11 @@ class SyncState:
         return cls(
             mappings=[ItemMapping.from_dict(m) for m in data.get("mappings", [])],
             pending_ops=[PendingOperation.from_dict(p) for p in data.get("pending_ops", [])],
+            ha_snapshot=(
+                [HAShoppingItem(**i) for i in data["ha_snapshot"]]
+                if data.get("ha_snapshot") is not None
+                else None
+            ),
             shopping_list_id=data.get("shopping_list_id", ""),
             last_alexa_snapshot_hash=data.get("last_alexa_snapshot_hash", ""),
             last_ha_snapshot_hash=data.get("last_ha_snapshot_hash", ""),
