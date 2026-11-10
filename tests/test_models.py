@@ -113,6 +113,21 @@ class TestItemMapping:
 class TestSyncState:
     """Tests for SyncState persistence."""
 
+    def test_legacy_state_without_ha_snapshot(self):
+        """Existing installations can load state written before snapshots existed."""
+        assert SyncState.from_dict({"mappings": []}).ha_snapshot is None
+
+    def test_ha_snapshot_round_trip(self):
+        """Persist active and completed items, including an explicitly empty list."""
+        from custom_components.alexa_shopping_sync.models import HAShoppingItem
+
+        for items in (
+            [],
+            [HAShoppingItem("h1", "Milk", False), HAShoppingItem("h2", "Bread", True)],
+        ):
+            state = SyncState(ha_snapshot=items)
+            assert SyncState.from_dict(state.to_dict()).ha_snapshot == items
+
     def test_round_trip(self):
         state = SyncState(
             shopping_list_id="list-1",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,6 +13,10 @@ from custom_components.alexa_shopping_sync.const import (
     TARGET_SHOPPING_LIST,
 )
 from custom_components.alexa_shopping_sync.coordinator import AlexaShoppingCoordinator
+from custom_components.alexa_shopping_sync.ha_list_bridge import compute_snapshot_hash
+from custom_components.alexa_shopping_sync.sync_engine import SyncResult
+
+from .conftest import make_ha_item
 
 ENTRY_ID = "entry-xyz"
 TARGET_ENTITY = "todo.cookidoo_extras"
@@ -52,6 +57,33 @@ def _make_coordinator() -> AlexaShoppingCoordinator:
     coord._ha_bridge = MagicMock()
     coord._target_list_unavailable_logged = False
     return coord
+
+
+@pytest.mark.asyncio
+async def test_todo_poll_checks_unchanged_snapshot_after_restart():
+    """Seed the HA baseline on the first poll, before the first user edit."""
+    coord = _make_coordinator()
+    coord._sync_lock = asyncio.Lock()
+    coord._force_once = False
+    coord._sync_enabled = True
+    coord._auth_manager = MagicMock(authenticated=True)
+    coord._amazon_client = MagicMock()
+    coord._amazon_client.async_get_snapshot = AsyncMock(return_value=[])
+    coord._sync_engine = MagicMock()
+    coord._sync_engine.async_sync_alexa_to_ha = AsyncMock(return_value=SyncResult())
+    coord._sync_engine.async_sync_ha_to_alexa = AsyncMock(
+        return_value=SyncResult(errors=["Update Alexa item: Temporary API failure"])
+    )
+    coord._sync_engine.async_save_state = AsyncMock()
+    items = [make_ha_item("h1", "Milk")]
+    coord._sync_engine.state.last_ha_snapshot_hash = compute_snapshot_hash(items)
+    coord._ha_bridge.async_get_items = AsyncMock(return_value=items)
+    coord._async_target_list_available = AsyncMock(return_value=True)
+
+    await coord._async_update_data()
+
+    coord._sync_engine.async_sync_ha_to_alexa.assert_awaited_once_with(items)
+    assert "Temporary API failure" in coord.last_error
 
 
 @pytest.mark.asyncio

@@ -165,6 +165,52 @@ class TestHaToAlexaSync:
     """Tests for HA -> Alexa sync."""
 
     @pytest.mark.asyncio
+    async def test_completion_after_restart_uses_saved_snapshot(
+        self, sync_engine, mock_amazon_client
+    ):
+        """Completing a mapped item while HA restarts must reach Alexa."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_ha_items = [make_ha_item("h1", "Milk")]
+        sync_engine._add_mapping("a1", "h1", "Milk", ItemSource.HA)
+        await sync_engine.async_save_state()
+        saved = sync_engine._store.async_save.call_args.args[0]
+
+        sync_engine._previous_ha_items = []
+        sync_engine._store.async_load.return_value = saved
+        await sync_engine.async_load_state()
+        result = await sync_engine.async_sync_ha_to_alexa(
+            [make_ha_item("h1", "Milk", complete=True)]
+        )
+
+        assert result.ha_to_alexa_updates == 1
+        mock_amazon_client.async_update_item.assert_awaited_once_with(
+            "a1", summary=None, complete=True
+        )
+        mock_amazon_client.async_add_item.assert_not_called()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure", [None, RuntimeError("Temporary API failure")])
+    async def test_failed_completion_is_retried(self, sync_engine, mock_amazon_client, failure):
+        """A rejected/failed write must not advance the comparison snapshot."""
+        sync_engine._initial_sync_done = True
+        sync_engine._previous_ha_items = [make_ha_item("h1", "Milk")]
+        sync_engine._add_mapping("a1", "h1", "Milk", ItemSource.HA)
+        mock_amazon_client.async_update_item.side_effect = [
+            failure,
+            make_alexa_item("a1", "Milk", complete=True),
+        ]
+        completed = [make_ha_item("h1", "Milk", complete=True)]
+
+        first = await sync_engine.async_sync_ha_to_alexa(completed)
+        second = await sync_engine.async_sync_ha_to_alexa(completed)
+
+        assert first.errors
+        assert first.ha_to_alexa_updates == 0
+        assert second.errors == []
+        assert second.ha_to_alexa_updates == 1
+        assert mock_amazon_client.async_update_item.await_count == 2
+
+    @pytest.mark.asyncio
     async def test_new_ha_item(self, sync_engine, mock_amazon_client):
         """New HA item should be added to Alexa."""
         sync_engine._initial_sync_done = True
@@ -203,6 +249,64 @@ class TestHaToAlexaSync:
 
 class TestEchoSuppression:
     """Tests for echo suppression / pending ops."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("origin", [ItemSource.HA, ItemSource.ALEXA])
+    @pytest.mark.parametrize("initial", [False, True])
+    @pytest.mark.parametrize("preserve_duplicates", [False, True])
+    async def test_delayed_add_echo_uses_mapping(
+        self,
+        sync_engine,
+        mock_amazon_client,
+        mock_ha_bridge,
+        origin,
+        initial,
+        preserve_duplicates,
+    ):
+        """A mapped add must not bounce back after its pending op expires."""
+        sync_engine._preserve_duplicates = preserve_duplicates
+        baseline_alexa = [make_alexa_item("a0", "Bread")]
+        baseline_ha = [make_ha_item("h0", "Bread")]
+        new_alexa = make_alexa_item("a1", "Eggs")
+        new_ha = make_ha_item("h1", "Eggs")
+        mock_amazon_client.async_add_item.return_value = new_alexa
+        mock_ha_bridge.async_add_item.return_value = new_ha
+        mock_amazon_client.async_get_snapshot.return_value = baseline_alexa
+        mock_ha_bridge.async_get_items.return_value = baseline_ha
+
+        if initial:
+            mock_ha_bridge.async_get_items.return_value = (
+                baseline_ha + [new_ha] if origin == ItemSource.HA else baseline_ha
+            )
+            await sync_engine.async_sync_alexa_to_ha(
+                baseline_alexa + [new_alexa] if origin == ItemSource.ALEXA else baseline_alexa
+            )
+        else:
+            await sync_engine.async_sync_alexa_to_ha(baseline_alexa)
+            if origin == ItemSource.HA:
+                await sync_engine.async_sync_ha_to_alexa(baseline_ha + [new_ha])
+            else:
+                await sync_engine.async_sync_alexa_to_ha(baseline_alexa + [new_alexa])
+
+        assert len(sync_engine.state.mappings) == 2
+        for op in sync_engine.state.pending_ops:
+            op.created_at = time.time() - PENDING_OP_GRACE_SECONDS * 4
+        mock_amazon_client.async_add_item.reset_mock()
+        mock_ha_bridge.async_add_item.reset_mock()
+        mock_amazon_client.async_get_snapshot.return_value = baseline_alexa + [new_alexa]
+        mock_ha_bridge.async_get_items.return_value = baseline_ha + [new_ha]
+
+        if origin == ItemSource.HA:
+            result = await sync_engine.async_sync_alexa_to_ha(baseline_alexa + [new_alexa])
+        else:
+            result = await sync_engine.async_sync_ha_to_alexa(baseline_ha + [new_ha])
+
+        assert result.errors == []
+        assert result.alexa_to_ha_adds == 0
+        assert result.ha_to_alexa_adds == 0
+        assert len(sync_engine.state.mappings) == 2
+        mock_ha_bridge.async_add_item.assert_not_called()
+        mock_amazon_client.async_add_item.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_own_write_not_reflected_back(self, sync_engine, mock_ha_bridge):
